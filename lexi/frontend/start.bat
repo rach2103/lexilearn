@@ -1,0 +1,3 @@
+@echo off
+echo Starting React development server...
+"C:\Program Files\nodejs\node.exe" "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" start

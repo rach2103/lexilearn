@@ -1,0 +1,657 @@
+@import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=PT+Sans:wght@400;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Load OpenDyslexic font */
+@font-face {
+  font-family: 'OpenDyslexic';
+  src: url('https://cdn.jsdelivr.net/npm/opendyslexic@1.0.3/OpenDyslexic-Regular.otf') format('opentype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'OpenDyslexic';
+  src: url('https://cdn.jsdelivr.net/npm/opendyslexic@1.0.3/OpenDyslexic-Bold.otf') format('opentype');
+  font-weight: bold;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'OpenDyslexic';
+  src: url('https://cdn.jsdelivr.net/npm/opendyslexic@1.0.3/OpenDyslexic-Italic.otf') format('opentype');
+  font-weight: normal;
+  font-style: italic;
+}
+
+/* Base styles for dyslexia-friendly design */
+@layer base {
+  :root {
+    --font-family: 'OpenDyslexic', 'Arial', sans-serif;
+    --font-size: 16px;
+    --line-height: 1.8;
+    --letter-spacing: 0.1em;
+    --word-spacing: 0.1em;
+  }
+
+  html {
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    line-height: var(--line-height);
+    letter-spacing: var(--letter-spacing);
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    line-height: var(--line-height);
+    letter-spacing: var(--letter-spacing);
+    word-spacing: var(--word-spacing);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: #ffffff;
+    color: #000000;
+  }
+
+  /* Color schemes */
+  body.high-contrast {
+    background-color: #ffffff;
+    color: #000000;
+  }
+
+  body.standard {
+    background-color: #f9fafb;
+    color: #111827;
+  }
+
+  body.dark {
+    background-color: #1f2937;
+    color: #f9fafb;
+  }
+
+  body.dark .bg-white,
+  body.dark .bg-gray-100 {
+    background-color: #374151 !important;
+  }
+
+  body.dark .bg-gray-50 {
+    background-color: #1f2937 !important;
+  }
+
+  body.dark .text-gray-900,
+  body.dark .text-gray-800,
+  body.dark .text-gray-700,
+  body.dark h1, body.dark h2, body.dark h3,
+  body.dark h4, body.dark h5, body.dark h6,
+  body.dark p, body.dark span, body.dark label,
+  body.dark .form-label,
+  body.dark div, body.dark a {
+    color: #f9fafb !important;
+  }
+
+  body.dark .text-gray-600,
+  body.dark .text-gray-500,
+  body.dark .text-gray-400 {
+    color: #d1d5db !important;
+  }
+
+  /* Dark mode card and container backgrounds */
+  body.dark .bg-white {
+    background-color: #374151 !important;
+    color: #f9fafb !important;
+  }
+
+  body.dark .shadow-sm,
+  body.dark .shadow-md,
+  body.dark .shadow-lg,
+  body.dark .shadow-xl {
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3) !important;
+  }
+
+  /* Dark mode for specific text colors */
+  body.dark .text-primary-600,
+  body.dark .text-primary-500 {
+    color: #60a5fa !important;
+  }
+
+  body.dark .text-success-800 {
+    color: #86efac !important;
+  }
+
+  body.dark .text-warning-800 {
+    color: #fcd34d !important;
+  }
+
+  /* Dark mode badge backgrounds */
+  body.dark .bg-success-100 {
+    background-color: #065f46 !important;
+  }
+
+  body.dark .bg-warning-100 {
+    background-color: #78350f !important;
+  }
+
+  body.dark input,
+  body.dark textarea,
+  body.dark select {
+    background-color: #374151 !important;
+    color: #f9fafb !important;
+    border-color: #4b5563 !important;
+  }
+
+  body.dark input::placeholder,
+  body.dark textarea::placeholder {
+    color: #9ca3af !important;
+  }
+
+  body.dark input:disabled {
+    background-color: #1f2937 !important;
+    color: #9ca3af !important;
+  }
+
+  body.dark .border-gray-200,
+  body.dark .border-gray-300 {
+    border-color: #4b5563 !important;
+  }
+
+  body.dark button {
+    color: #f9fafb;
+  }
+
+  body.dark .bg-gray-100:hover,
+  body.dark .hover\:bg-gray-200:hover {
+    background-color: #4b5563 !important;
+  }
+
+  /* Dark mode dropdown menus */
+  body.dark .shadow-lg {
+    box-shadow: 0 10px 15px rgba(0, 0, 0, 0.5) !important;
+  }
+
+  /* Dark mode for hover states */
+  body.dark .hover\:bg-gray-50:hover {
+    background-color: #4b5563 !important;
+  }
+
+  body.dark .hover\:bg-gray-100:hover {
+    background-color: #4b5563 !important;
+  }
+
+  /* Dark mode for primary backgrounds */
+  body.dark .bg-primary-100 {
+    background-color: #1e3a8a !important;
+  }
+
+  body.dark .text-primary-700 {
+    color: #93c5fd !important;
+  }
+
+  /* Dark mode for gradient backgrounds */
+  body.dark .bg-gradient-to-br {
+    background: linear-gradient(to bottom right, #1f2937, #111827) !important;
+  }
+
+  /* Dark mode for info/blue backgrounds */
+  body.dark .bg-blue-50 {
+    background-color: #1e3a8a !important;
+  }
+
+  body.dark .border-blue-200 {
+    border-color: #1e40af !important;
+  }
+
+  body.dark .text-blue-900,
+  body.dark .text-blue-800 {
+    color: #93c5fd !important;
+  }
+
+  /* Dark mode for error backgrounds */
+  body.dark .bg-error-50 {
+    background-color: #7f1d1d !important;
+  }
+
+  body.dark .border-error-200 {
+    border-color: #991b1b !important;
+  }
+
+  body.dark .text-error-700 {
+    color: #fca5a5 !important;
+  }
+
+  body.sepia {
+    background-color: #f4ecd8;
+    color: #5c4a2f;
+  }
+
+  body.sepia .bg-white,
+  body.sepia .bg-gray-100 {
+    background-color: #f9f5e7 !important;
+  }
+
+  body.sepia .bg-gray-50 {
+    background-color: #f4ecd8 !important;
+  }
+
+  body.sepia .text-gray-900,
+  body.sepia h1, body.sepia h2, body.sepia h3,
+  body.sepia h4, body.sepia h5, body.sepia h6 {
+    color: #5c4a2f !important;
+  }
+
+  body.sepia .text-gray-600,
+  body.sepia .text-gray-500 {
+    color: #8b7355 !important;
+  }
+
+  body.sepia input,
+  body.sepia textarea,
+  body.sepia select {
+    background-color: #f9f5e7;
+    color: #5c4a2f;
+    border-color: #d4c5a9;
+  }
+
+  body.sepia .border-gray-200 {
+    border-color: #d4c5a9 !important;
+  }
+
+  /* Dyslexia-friendly text selection */
+  ::selection {
+    background-color: #0066cc;
+    color: #ffffff;
+  }
+
+  ::-moz-selection {
+    background-color: #0066cc;
+    color: #ffffff;
+  }
+
+  /* Focus indicators for accessibility */
+  *:focus {
+    outline: 3px solid #0066cc;
+    outline-offset: 2px;
+  }
+
+  /* Dyslexia-friendly link styles */
+  a {
+    color: #0066cc;
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 4px;
+  }
+
+  a:hover {
+    color: #004499;
+    text-decoration-thickness: 3px;
+  }
+
+  /* Dyslexia-friendly button styles */
+  button {
+    font-family: var(--font-family);
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    border-radius: 12px;
+    padding: 14px 28px;
+    transition: all 0.3s ease;
+    min-height: 48px;
+    font-size: 1.125rem;
+  }
+
+  button:focus {
+    outline: 3px solid #0066cc;
+    outline-offset: 2px;
+  }
+
+  /* Dyslexia-friendly input styles */
+  input, textarea, select {
+    font-family: var(--font-family);
+    font-size: 1.125rem;
+    line-height: var(--line-height);
+    letter-spacing: var(--letter-spacing);
+    padding: 12px 16px;
+    border: 2px solid #cccccc;
+    border-radius: 8px;
+    background-color: #ffffff;
+    color: #000000;
+  }
+
+  input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: #0066cc;
+    box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.1);
+  }
+
+  /* Dyslexia-friendly heading styles */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-family);
+    font-weight: 700;
+    line-height: 1.4;
+    letter-spacing: var(--letter-spacing);
+    margin-bottom: 1rem;
+  }
+
+  h1 {
+    font-size: 2.25rem;
+  }
+
+  h2 {
+    font-size: 1.875rem;
+  }
+
+  h3 {
+    font-size: 1.5rem;
+  }
+
+  h4 {
+    font-size: 1.25rem;
+  }
+
+  h5 {
+    font-size: 1.125rem;
+  }
+
+  h6 {
+    font-size: 1rem;
+  }
+
+  /* Dyslexia-friendly paragraph styles */
+  p {
+    font-size: 1.125rem;
+    line-height: var(--line-height);
+    letter-spacing: var(--letter-spacing);
+    word-spacing: var(--word-spacing);
+    margin-bottom: 1rem;
+  }
+
+  /* Dyslexia-friendly list styles */
+  ul, ol {
+    font-size: 1.125rem;
+    line-height: var(--line-height);
+    letter-spacing: var(--letter-spacing);
+    word-spacing: var(--word-spacing);
+    margin-bottom: 1rem;
+    padding-left: 2rem;
+  }
+
+  li {
+    margin-bottom: 0.5rem;
+  }
+
+  /* Dyslexia-friendly table styles */
+  table {
+    font-size: 1rem;
+    line-height: 1.6;
+    letter-spacing: 0.05em;
+    border-collapse: collapse;
+    width: 100%;
+    margin-bottom: 1rem;
+  }
+
+  th, td {
+    padding: 12px;
+    text-align: left;
+    border: 2px solid #cccccc;
+  }
+
+  th {
+    background-color: #f0f0f0;
+    font-weight: 700;
+  }
+
+  /* Dyslexia-friendly code styles */
+  code {
+    font-family: 'Courier New', monospace;
+    background-color: #f0f0f0;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+
+  pre {
+    font-family: 'Courier New', monospace;
+    background-color: #f0f0f0;
+    padding: 16px;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin-bottom: 1rem;
+  }
+
+  /* Dyslexia-friendly blockquote styles */
+  blockquote {
+    border-left: 4px solid #0066cc;
+    padding-left: 16px;
+    margin: 1rem 0;
+    font-style: italic;
+    background-color: #f8f9fa;
+    padding: 16px;
+    border-radius: 8px;
+  }
+
+  /* Dyslexia-friendly image styles */
+  img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+  }
+
+  /* Dyslexia-friendly form styles */
+  .form-group {
+    margin-bottom: 1.5rem;
+  }
+
+  .form-label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    font-size: 1.125rem;
+  }
+
+  .form-error {
+    color: #cc0000;
+    font-size: 1rem;
+    margin-top: 0.5rem;
+  }
+
+  .form-success {
+    color: #006600;
+    font-size: 1rem;
+    margin-top: 0.5rem;
+  }
+
+  /* Dyslexia-friendly card styles */
+  .card {
+    background-color: #ffffff;
+    border: 2px solid #cccccc;
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+
+  .card:hover {
+    box-shadow: 0 8px 12px rgba(0, 0, 0, 0.15);
+  }
+
+  /* Dyslexia-friendly modal styles */
+  .modal {
+    background-color: rgba(0, 0, 0, 0.5);
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .modal-content {
+    background-color: #ffffff;
+    border-radius: 12px;
+    padding: 32px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+
+  /* Dyslexia-friendly loading styles */
+  .loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+  }
+
+  .spinner {
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #0066cc;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
+  /* Dyslexia-friendly error highlighting */
+  .error-highlight {
+    background-color: #ffebee;
+    border: 2px solid #f44336;
+    border-radius: 4px;
+    padding: 4px 8px;
+    margin: 2px;
+  }
+
+  .error-spelling {
+    background-color: #ff6b6b;
+    color: #ffffff;
+  }
+
+  .error-grammar {
+    background-color: #4ecdc4;
+    color: #ffffff;
+  }
+
+  .error-word-order {
+    background-color: #45b7d1;
+    color: #ffffff;
+  }
+
+  .error-phonetic {
+    background-color: #96ceb4;
+    color: #ffffff;
+  }
+
+  .error-suggestion {
+    background-color: #ffeaa7;
+    color: #000000;
+  }
+
+  /* Responsive design for dyslexia */
+  @media (max-width: 768px) {
+    html {
+      font-size: 16px;
+    }
+
+    h1 {
+      font-size: 1.875rem;
+    }
+
+    h2 {
+      font-size: 1.5rem;
+    }
+
+    h3 {
+      font-size: 1.25rem;
+    }
+
+    .card {
+      padding: 16px;
+    }
+
+    .modal-content {
+      padding: 24px;
+      width: 95%;
+    }
+  }
+
+  /* Print styles for dyslexia */
+  @media print {
+    body {
+      font-size: 14pt;
+      line-height: 1.6;
+      color: #000000;
+      background-color: #ffffff;
+    }
+
+    a {
+      color: #000000;
+      text-decoration: underline;
+    }
+
+    .no-print {
+      display: none !important;
+    }
+  }
+}
+
+/* Component-specific styles */
+@layer components {
+  .btn-primary {
+    @apply bg-primary-600 text-white font-semibold py-3 px-6 rounded-lg hover:bg-primary-700 focus:outline-none focus:ring-4 focus:ring-primary-300 transition-all duration-200;
+  }
+
+  .btn-secondary {
+    @apply bg-secondary-600 text-white font-semibold py-3 px-6 rounded-lg hover:bg-secondary-700 focus:outline-none focus:ring-4 focus:ring-secondary-300 transition-all duration-200;
+  }
+
+  .btn-success {
+    @apply bg-success-600 text-white font-semibold py-3 px-6 rounded-lg hover:bg-success-700 focus:outline-none focus:ring-4 focus:ring-success-300 transition-all duration-200;
+  }
+
+  .btn-warning {
+    @apply bg-warning-600 text-white font-semibold py-3 px-6 rounded-lg hover:bg-warning-700 focus:outline-none focus:ring-4 focus:ring-warning-300 transition-all duration-200;
+  }
+
+  .btn-error {
+    @apply bg-error-600 text-white font-semibold py-3 px-6 rounded-lg hover:bg-error-700 focus:outline-none focus:ring-4 focus:ring-error-300 transition-all duration-200;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-primary-500 focus:ring-4 focus:ring-primary-200 transition-all duration-200;
+  }
+
+  .text-dyslexic {
+    @apply font-dyslexic text-dyslexic-base leading-dyslexic tracking-dyslexic;
+  }
+
+  .heading-dyslexic {
+    @apply font-dyslexic font-bold leading-tight tracking-dyslexic;
+  }
+
+  /* Line clamp utilities */
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}

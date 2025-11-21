@@ -1,0 +1,346 @@
+import os
+import requests
+import json
+import zipfile
+import cv2
+import numpy as np
+from typing import Dict, List, Any, Tuple
+import tensorflow as tf
+from tensorflow import keras
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+import pickle
+from config import settings
+
+class DyslexiaHandwritingTrainer:
+    """Train handwriting recognition model using Kaggle dyslexia dataset"""
+    
+    def __init__(self):
+        self.kaggle_api_key = os.getenv("KAGGLE_KEY")
+        self.kaggle_username = os.getenv("KAGGLE_USERNAME")
+        self.dataset_path = "ml_models/cache/dyslexia_handwriting"
+        self.model_path = "ml_models/cache/dyslexia_model.h5"
+        self.label_encoder_path = "ml_models/cache/label_encoder.pkl"
+        
+    def download_dataset(self) -> bool:
+        """Download dyslexia handwriting dataset from Kaggle"""
+        if not self.kaggle_api_key or not self.kaggle_username:
+            print("Kaggle credentials not found. Set KAGGLE_USERNAME and KAGGLE_KEY in .env")
+            return False
+            
+        try:
+            # Setup Kaggle API
+            os.environ['KAGGLE_USERNAME'] = self.kaggle_username
+            os.environ['KAGGLE_KEY'] = self.kaggle_api_key
+            
+            from kaggle.api.kaggle_api_extended import KaggleApi
+            api = KaggleApi()
+            api.authenticate()
+            
+            # Download dyslexia handwriting dataset
+            dataset_name = "aadityakumar01/dyslexia-handwriting-dataset"
+            
+            os.makedirs(self.dataset_path, exist_ok=True)
+            
+            print("Downloading dyslexia handwriting dataset...")
+            api.dataset_download_files(dataset_name, path=self.dataset_path, unzip=True)
+            
+            print("Dataset downloaded successfully!")
+            return True
+            
+        except Exception as e:
+            print(f"Error downloading dataset: {str(e)}")
+            return False
+    
+    def preprocess_images(self, image_dir: str) -> Tuple[np.ndarray, np.ndarray]:
+        """Preprocess handwriting images for training"""
+        images = []
+        labels = []
+        
+        # Expected image size
+        img_size = (128, 128)
+        
+        for root, dirs, files in os.walk(image_dir):
+            for file in files:
+                if file.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    image_path = os.path.join(root, file)
+                    
+                    # Extract label from folder structure or filename
+                    label = self._extract_label(image_path)
+                    if label is None:
+                        continue
+                    
+                    # Load and preprocess image
+                    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+                    if image is None:
+                        continue
+                    
+                    # Resize and normalize
+                    image = cv2.resize(image, img_size)
+                    image = image.astype('float32') / 255.0
+                    
+                    # Apply dyslexia-specific preprocessing
+                    image = self._dyslexia_preprocessing(image)
+                    
+                    images.append(image)
+                    labels.append(label)
+        
+        return np.array(images), np.array(labels)
+    
+    def _extract_label(self, image_path: str) -> str:
+        """Extract character/word label from image path"""
+        # Common patterns in dyslexia datasets
+        filename = os.path.basename(image_path)
+        
+        # Pattern 1: character_X.jpg where X is the character
+        if '_' in filename:
+            parts = filename.split('_')
+            if len(parts) >= 2:
+                return parts[1].split('.')[0].lower()
+        
+        # Pattern 2: folder name as label
+        folder_name = os.path.basename(os.path.dirname(image_path))
+        if len(folder_name) == 1 and folder_name.isalpha():
+            return folder_name.lower()
+        
+        # Pattern 3: first character of filename
+        if filename[0].isalpha():
+            return filename[0].lower()
+        
+        return None
+    
+    def _dyslexia_preprocessing(self, image: np.ndarray) -> np.ndarray:
+        """Apply dyslexia-specific image preprocessing"""
+        # Enhance contrast for better character recognition
+        image = cv2.equalizeHist((image * 255).astype(np.uint8)) / 255.0
+        
+        # Apply slight blur to reduce noise (common in dyslexic handwriting)
+        image = cv2.GaussianBlur(image, (3, 3), 0)
+        
+        # Morphological operations to clean up handwriting
+        kernel = np.ones((2, 2), np.uint8)
+        image = cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel)
+        
+        return image
+    
+    def create_model(self, num_classes: int) -> keras.Model:
+        """Create CNN model optimized for dyslexic handwriting"""
+        model = keras.Sequential([
+            keras.layers.Input(shape=(128, 128, 1)),
+            
+            # First conv block
+            keras.layers.Conv2D(32, (3, 3), activation='relu', padding='same'),
+            keras.layers.BatchNormalization(),
+            keras.layers.MaxPooling2D((2, 2)),
+            keras.layers.Dropout(0.25),
+            
+            # Second conv block
+            keras.layers.Conv2D(64, (3, 3), activation='relu', padding='same'),
+            keras.layers.BatchNormalization(),
+            keras.layers.MaxPooling2D((2, 2)),
+            keras.layers.Dropout(0.25),
+            
+            # Third conv block
+            keras.layers.Conv2D(128, (3, 3), activation='relu', padding='same'),
+            keras.layers.BatchNormalization(),
+            keras.layers.MaxPooling2D((2, 2)),
+            keras.layers.Dropout(0.25),
+            
+            # Dense layers
+            keras.layers.Flatten(),
+            keras.layers.Dense(256, activation='relu'),
+            keras.layers.BatchNormalization(),
+            keras.layers.Dropout(0.5),
+            keras.layers.Dense(128, activation='relu'),
+            keras.layers.Dropout(0.3),
+            keras.layers.Dense(num_classes, activation='softmax')
+        ])
+        
+        model.compile(
+            optimizer='adam',
+            loss='sparse_categorical_crossentropy',
+            metrics=['accuracy']
+        )
+        
+        return model
+    
+    def train_model(self) -> bool:
+        """Train the dyslexia handwriting recognition model"""
+        try:
+            # Download dataset if not exists
+            if not os.path.exists(self.dataset_path):
+                if not self.download_dataset():
+                    return False
+            
+            print("Preprocessing images...")
+            images, labels = self.preprocess_images(self.dataset_path)
+            
+            if len(images) == 0:
+                print("No images found in dataset")
+                return False
+            
+            print(f"Found {len(images)} images with {len(set(labels))} unique labels")
+            
+            # Encode labels
+            label_encoder = LabelEncoder()
+            encoded_labels = label_encoder.fit_transform(labels)
+            
+            # Save label encoder
+            with open(self.label_encoder_path, 'wb') as f:
+                pickle.dump(label_encoder, f)
+            
+            # Reshape images for CNN
+            images = images.reshape(-1, 128, 128, 1)
+            
+            # Split data
+            X_train, X_test, y_train, y_test = train_test_split(
+                images, encoded_labels, test_size=0.2, random_state=42, stratify=encoded_labels
+            )
+            
+            print("Creating model...")
+            model = self.create_model(len(label_encoder.classes_))
+            
+            # Training callbacks
+            callbacks = [
+                keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True),
+                keras.callbacks.ReduceLROnPlateau(factor=0.5, patience=5),
+                keras.callbacks.ModelCheckpoint(self.model_path, save_best_only=True)
+            ]
+            
+            print("Training model...")
+            history = model.fit(
+                X_train, y_train,
+                validation_data=(X_test, y_test),
+                epochs=50,
+                batch_size=32,
+                callbacks=callbacks,
+                verbose=1
+            )
+            
+            # Evaluate model
+            test_loss, test_accuracy = model.evaluate(X_test, y_test, verbose=0)
+            print(f"Test accuracy: {test_accuracy:.4f}")
+            
+            # Save final model
+            model.save(self.model_path)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error training model: {str(e)}")
+            return False
+    
+    def load_trained_model(self) -> Tuple[keras.Model, LabelEncoder]:
+        """Load trained model and label encoder"""
+        try:
+            model = keras.models.load_model(self.model_path)
+            
+            with open(self.label_encoder_path, 'rb') as f:
+                label_encoder = pickle.load(f)
+            
+            return model, label_encoder
+            
+        except Exception as e:
+            print(f"Error loading model: {str(e)}")
+            return None, None
+
+class DyslexiaHandwritingRecognizer:
+    """Enhanced handwriting recognizer using trained dyslexia model"""
+    
+    def __init__(self):
+        self.trainer = DyslexiaHandwritingTrainer()
+        self.model = None
+        self.label_encoder = None
+        self._load_model()
+    
+    def _load_model(self):
+        """Load the trained model"""
+        self.model, self.label_encoder = self.trainer.load_trained_model()
+        if self.model is None:
+            print("Dyslexia model not found. Training new model...")
+            if self.trainer.train_model():
+                self.model, self.label_encoder = self.trainer.load_trained_model()
+    
+    async def recognize_dyslexic_handwriting(self, image_path: str) -> Dict[str, Any]:
+        """Recognize handwriting with dyslexia-specific analysis"""
+        if self.model is None:
+            return {
+                "success": False,
+                "error": "Dyslexia model not available",
+                "fallback_to": "tesseract"
+            }
+        
+        try:
+            # Preprocess image
+            image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+            image = cv2.resize(image, (128, 128))
+            image = image.astype('float32') / 255.0
+            image = self.trainer._dyslexia_preprocessing(image)
+            image = image.reshape(1, 128, 128, 1)
+            
+            # Predict
+            predictions = self.model.predict(image)
+            predicted_class = np.argmax(predictions[0])
+            confidence = float(predictions[0][predicted_class])
+            
+            # Decode prediction
+            predicted_char = self.label_encoder.inverse_transform([predicted_class])[0]
+            
+            # Analyze dyslexia-specific patterns
+            dyslexia_analysis = self._analyze_dyslexia_patterns(predicted_char, confidence)
+            
+            return {
+                "success": True,
+                "recognized_text": predicted_char,
+                "confidence": confidence,
+                "method": "dyslexia_cnn",
+                "dyslexia_analysis": dyslexia_analysis,
+                "errors": dyslexia_analysis.get("potential_errors", [])
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "fallback_to": "tesseract"
+            }
+    
+    def _analyze_dyslexia_patterns(self, predicted_char: str, confidence: float) -> Dict[str, Any]:
+        """Analyze common dyslexia handwriting patterns"""
+        analysis = {
+            "predicted_character": predicted_char,
+            "confidence_level": "high" if confidence > 0.8 else "medium" if confidence > 0.5 else "low",
+            "potential_errors": [],
+            "suggestions": []
+        }
+        
+        # Common dyslexia letter confusions
+        dyslexia_confusions = {
+            'b': ['d', 'p', 'q'],
+            'd': ['b', 'p', 'q'],
+            'p': ['b', 'd', 'q'],
+            'q': ['b', 'd', 'p'],
+            'm': ['w'],
+            'w': ['m'],
+            'n': ['u'],
+            'u': ['n']
+        }
+        
+        if predicted_char in dyslexia_confusions:
+            analysis["potential_errors"] = [
+                {
+                    "type": "letter_reversal",
+                    "confused_with": dyslexia_confusions[predicted_char],
+                    "description": f"'{predicted_char}' commonly confused with {dyslexia_confusions[predicted_char]}"
+                }
+            ]
+            
+            analysis["suggestions"] = [
+                f"Double-check if this is '{predicted_char}' or one of: {', '.join(dyslexia_confusions[predicted_char])}",
+                "Consider the context of the word to verify the correct letter"
+            ]
+        
+        return analysis
+
+# Global instance
+dyslexia_recognizer = DyslexiaHandwritingRecognizer()

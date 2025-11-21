@@ -1,0 +1,98 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# Environment variables
+.env
+.env.local
+.env.production
+.env.test
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+lexi.db
+test_lexi.db
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node.js (frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+
+# Build outputs
+dist/
+build/
+out/
+
+# ML Models and Cache
+ml_models/cache/
+*.pkl
+*.joblib
+*.h5
+*.pb
+*.onnx
+
+# Uploads and temp files
+uploads/
+temp/
+tmp/
+
+# Coverage reports
+htmlcov/
+.coverage
+.pytest_cache/
+
+# API keys and secrets
+config/secrets.py
+*.pem
+*.key
+*.crt
+
+# Backup files
+*.bak
+*_backup.*
+venv_backup_requirements.txt
