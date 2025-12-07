@@ -33,6 +33,8 @@ const ChatBot = () => {
   const [isReading, setIsReading] = useState(false);
   const [chatHistory, setChatHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [selectedDateMessages, setSelectedDateMessages] = useState([]);
   
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
@@ -60,6 +62,23 @@ const ChatBot = () => {
     const initializeChat = async () => {
       // Load chat history first
       await loadChatHistory();
+      
+      // Check if user cleared the screen
+      const screenCleared = localStorage.getItem('chatScreenCleared') === 'true';
+      
+      if (screenCleared) {
+        // Show only welcome message if screen was cleared
+        setMessages([
+          {
+            id: 1,
+            type: 'ai',
+            content: `Hello ${user?.full_name || 'there'}! I'm your LexiLearn AI tutor. I can help you with reading, writing, and speaking exercises. You can type, speak, or upload images of your handwriting. Let's start learning!`,
+            timestamp: new Date(),
+            analysis: null
+          }
+        ]);
+        return;
+      }
       
       // Check if there's existing history
       const response = await axios.get('/api/chat/history');
@@ -117,24 +136,37 @@ const ChatBot = () => {
       console.log('Chat history response:', response.data);
       
       if (response.data && response.data.history_by_date) {
-        // Flatten history from date-grouped format
-        const flatHistory = [];
-        response.data.history_by_date.forEach(dateGroup => {
-          dateGroup.messages.forEach(msg => {
-            flatHistory.push({
-              id: `${dateGroup.date}_${msg.timestamp}`,
-              user_message: msg.user_message,
-              ai_response: msg.bot_response,
-              timestamp: msg.timestamp
-            });
-          });
-        });
-        setChatHistory(flatHistory);
-        console.log('Loaded chat history:', flatHistory.length, 'messages');
+        // Keep day-wise grouped format
+        setChatHistory(response.data.history_by_date);
+        console.log('Loaded chat history:', response.data.history_by_date.length, 'days');
       }
     } catch (error) {
       console.error('Failed to load chat history:', error);
     }
+  };
+
+  // Load specific date's messages
+  const loadDateMessages = (dateGroup) => {
+    const messages = [];
+    let messageId = 1;
+    
+    dateGroup.messages.forEach((item) => {
+      messages.push({
+        id: messageId++,
+        type: 'user',
+        content: item.user_message,
+        timestamp: new Date(item.timestamp)
+      });
+      messages.push({
+        id: messageId++,
+        type: 'ai',
+        content: item.bot_response,
+        timestamp: new Date(item.timestamp)
+      });
+    });
+    
+    setSelectedDate(dateGroup.date);
+    setSelectedDateMessages(messages);
   };
 
   // Text analysis function
@@ -259,6 +291,9 @@ const ChatBot = () => {
   // Send message
   const sendMessage = async () => {
     if (!inputText.trim() && !selectedFile) return;
+
+    // Clear the screen cleared flag when user sends a new message
+    localStorage.removeItem('chatScreenCleared');
 
     const userMessage = {
       id: Date.now(),
@@ -714,6 +749,35 @@ const ChatBot = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
+      {/* Date Messages Modal */}
+      {selectedDate && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center" onClick={() => setSelectedDate(null)}>
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-primary-600 text-white px-6 py-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold">Chat History</h3>
+                <p className="text-sm text-primary-100">{selectedDate}</p>
+              </div>
+              <button onClick={() => setSelectedDate(null)} className="text-white hover:text-gray-200">
+                <FiX size={24} />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto max-h-[calc(80vh-80px)] space-y-4">
+              {selectedDateMessages.map((message) => (
+                <div key={message.id} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-lg rounded-lg p-4 ${message.type === 'user' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-900'}`}>
+                    <div className="text-sm whitespace-pre-wrap">{message.content}</div>
+                    <div className={`text-xs mt-2 ${message.type === 'user' ? 'text-primary-100' : 'text-gray-500'}`}>
+                      {message.timestamp.toLocaleTimeString()}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* History Sidebar */}
       <div className={`${showHistory ? 'w-64' : 'w-0'} transition-all duration-300 bg-white border-r border-gray-200 overflow-hidden`}>
         <div className="p-4">
@@ -724,10 +788,21 @@ const ChatBot = () => {
             </button>
           </div>
           <div className="space-y-2 max-h-[calc(100vh-120px)] overflow-y-auto">
-            {chatHistory.map((item) => (
-              <div key={item.id} className="p-2 bg-gray-50 rounded hover:bg-gray-100 cursor-pointer">
-                <p className="text-xs text-gray-500">{new Date(item.timestamp).toLocaleString()}</p>
-                <p className="text-sm text-gray-700 truncate">{item.user_message}</p>
+            {chatHistory.map((dateGroup) => (
+              <div 
+                key={dateGroup.date} 
+                onClick={() => loadDateMessages(dateGroup)}
+                className="p-3 bg-gray-50 rounded-lg hover:bg-primary-50 cursor-pointer border border-gray-200 hover:border-primary-300 transition-all"
+              >
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-gray-800">{dateGroup.date}</p>
+                  <span className="text-xs bg-primary-100 text-primary-700 px-2 py-1 rounded-full">
+                    {dateGroup.message_count}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  {dateGroup.messages[0]?.user_message.substring(0, 40)}...
+                </p>
               </div>
             ))}
             {chatHistory.length === 0 && (
@@ -763,6 +838,24 @@ const ChatBot = () => {
               </div>
             </div>
             <div className="flex items-center space-x-2">
+            <button
+              onClick={() => {
+                setMessages([{
+                  id: 1,
+                  type: 'ai',
+                  content: `Hello ${user?.full_name || 'there'}! I'm your LexiLearn AI tutor. I can help you with reading, writing, and speaking exercises. You can type, speak, or upload images of your handwriting. Let's start learning!`,
+                  timestamp: new Date(),
+                  analysis: null
+                }]);
+                localStorage.setItem('chatScreenCleared', 'true');
+                toast.success('Screen cleared! Your history is still saved.');
+              }}
+              className="p-2 text-gray-500 hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 rounded-lg"
+              aria-label="Clear screen"
+              title="Clear screen (history is saved)"
+            >
+              <FiX size={20} />
+            </button>
             <button
               onClick={() => settings.textToSpeech && speakText("Welcome to LexiLearn AI Chat")}
               className="p-2 text-gray-500 hover:text-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-500 rounded-lg"

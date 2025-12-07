@@ -461,15 +461,30 @@ class ExerciseGenerator:
             
             exercises = []
             for word in words:
-                # Create word with missing letters
+                # Create word with missing letters - show more context
                 missing_pos = random.randint(1, len(word) - 2)
                 incomplete_word = word[:missing_pos] + "_" + word[missing_pos + 1:]
+                
+                # Add hint about the word meaning to avoid ambiguity
+                hints = {
+                    "rope": "something you tie things with",
+                    "cake": "a sweet dessert",
+                    "hope": "to wish for something",
+                    "like": "to enjoy something",
+                    "time": "measured by a clock",
+                    "bike": "you ride this",
+                    "make": "to create something",
+                    "game": "something you play",
+                    "tube": "a hollow cylinder",
+                    "cute": "adorable or pretty"
+                }
                 
                 exercises.append({
                     "incomplete_word": incomplete_word,
                     "correct_word": word,
                     "missing_letter": word[missing_pos],
-                    "pattern": pattern_data["pattern"]
+                    "pattern": pattern_data["pattern"],
+                    "hint": hints.get(word, "complete the word")
                 })
             
             return {
@@ -477,7 +492,7 @@ class ExerciseGenerator:
                 "skill_area": "spelling",
                 "exercise_type": exercise_type,
                 "difficulty": difficulty,
-                "instructions": template["instructions"],
+                "instructions": "Complete each word using the correct spelling pattern. Use the hints to find the right word.",
                 "pattern": pattern_data["pattern"],
                 "exercises": exercises,
                 "feedback_templates": template["feedback"]

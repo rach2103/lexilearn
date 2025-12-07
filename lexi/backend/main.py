@@ -659,27 +659,46 @@ async def process_chat_message(message_data: dict, user_id: int):
     return response
 
 @app.post("/api/chat/message")
-async def send_chat_message(message_data: dict, current_user: User = Depends(get_current_user)):
+async def send_chat_message(message_data: dict, current_user: User = Depends(get_current_user), db_manager = Depends(get_db)):
     """Send a message to the AI tutor (REST endpoint)"""
     # Use user email as identifier
     user_id = current_user["email"]
     response = await process_chat_message(message_data, user_id)
+    
+    # Save to database
+    session_id = ai_tutor.get_current_session_id(user_id)
+    db_manager.save_chat_message(
+        user_id=current_user["id"],
+        session_id=session_id,
+        user_message=message_data.get("message", ""),
+        bot_response=response.get("message", "")
+    )
+    
     return response
 
 @app.get("/api/chat/history")
-async def get_chat_history(limit: int = 20, current_user: User = Depends(get_current_user)):
+async def get_chat_history(limit: int = 20, current_user: User = Depends(get_current_user), db_manager = Depends(get_db)):
     """Get chat history organized by date"""
     user_id = current_user["email"]
+    db_user_id = current_user["id"]
     
     print(f"[DEBUG] Getting chat history for user: {user_id}")
-    print(f"[DEBUG] All users in conversation_history: {list(ai_tutor.conversation_history.keys())}")
+    
+    # Load from database first
+    db_history = db_manager.load_chat_history(db_user_id)
     
     # Start session if not exists
     if user_id not in ai_tutor.conversation_history:
         ai_tutor.start_new_session(user_id)
     
-    # Get all sessions for this user
+    # Merge database history with in-memory history
     all_sessions = ai_tutor.conversation_history.get(user_id, {})
+    
+    # Add database sessions to AI tutor memory if not already there
+    for session_id, messages in db_history.items():
+        if session_id not in all_sessions:
+            all_sessions[session_id] = messages
+    
     print(f"[DEBUG] Total sessions for user: {len(all_sessions)}")
     
     # Organize messages by date
@@ -725,25 +744,42 @@ async def get_chat_history(limit: int = 20, current_user: User = Depends(get_cur
     }
 
 @app.get("/api/user/stats")
-async def get_user_stats(current_user: User = Depends(get_current_user)):
+async def get_user_stats(current_user: User = Depends(get_current_user), db_manager = Depends(get_db)):
     """Get user statistics for dashboard"""
-    user_id = current_user["email"]
+    user_id = current_user["id"]
+    user_email = current_user["email"]
     
-    # Get progress from AI tutor
-    ai_progress = ai_tutor.user_progress.get(user_id, {})
-    sessions = ai_progress.get("sessions", [])
+    # Get progress from database
+    progress_entries = db_manager.get_user_progress(user_id)
     
-    # Calculate statistics
-    total_exercises = len(sessions)
-    correct_count = sum(1 for s in sessions if s.get("data", {}).get("correct", False))
-    accuracy = (correct_count / total_exercises * 100) if total_exercises > 0 else 0
+    # Calculate exercises completed and accuracy from database
+    total_exercises = len(progress_entries)
+    total_accuracy = sum(p["accuracy"] for p in progress_entries) if progress_entries else 0
+    accuracy = (total_accuracy / total_exercises) if total_exercises > 0 else 0
     
-    # Get chat history count
-    chat_history = ai_tutor.get_history(user_id, 1000)
-    total_messages = len(chat_history)
+    # Calculate study time from database (session_duration is in seconds)
+    total_study_time = sum(p["session_duration"] for p in progress_entries) // 60 if progress_entries else 0
     
-    # Calculate study time (estimate based on sessions)
-    total_study_time = len(sessions) * 5  # Assume 5 minutes per session
+    # Get chat history from database
+    chat_history = db_manager.load_chat_history(user_id)
+    total_messages = sum(len(messages) for messages in chat_history.values())
+    
+    # Also check AI tutor in-memory data for current session
+    ai_progress = ai_tutor.user_progress.get(user_email, {})
+    ai_sessions = ai_progress.get("sessions", [])
+    
+    # Add in-memory session data to totals
+    if ai_sessions:
+        total_exercises += len(ai_sessions)
+        correct_count = sum(1 for s in ai_sessions if s.get("data", {}).get("correct", False))
+        if ai_sessions:
+            ai_accuracy = (correct_count / len(ai_sessions) * 100)
+            accuracy = ((accuracy * len(progress_entries)) + ai_accuracy) / (len(progress_entries) + 1) if progress_entries else ai_accuracy
+        total_study_time += len(ai_sessions) * 5
+    
+    # Get chat messages from AI tutor memory
+    ai_chat_history = ai_tutor.get_history(user_email, 1000)
+    total_messages += len(ai_chat_history)
     
     # Calculate skill-specific progress
     skill_progress = {
@@ -770,12 +806,12 @@ async def get_user_stats(current_user: User = Depends(get_current_user)):
         "reading_comprehension": "comprehension"
     }
     
-    for session in sessions:
+    # Process AI tutor sessions
+    for session in ai_sessions:
         data = session.get("data", {})
         skill_area = data.get("skill_area", "")
         is_correct = data.get("correct", False)
         
-        # Map to category
         category = skill_mapping.get(skill_area)
         if category:
             skill_counts[category]["total"] += 1
@@ -793,7 +829,7 @@ async def get_user_stats(current_user: User = Depends(get_current_user)):
         "total_messages": total_messages,
         "study_time_minutes": total_study_time,
         "skill_progress": skill_progress,
-        "recent_activity": sessions[-5:] if sessions else []
+        "recent_activity": ai_sessions[-5:] if ai_sessions else []
     }
 
 @app.delete("/api/chat/history")
@@ -1193,7 +1229,8 @@ async def get_adaptive_exercises(current_user: User = Depends(get_current_user))
 async def submit_exercise_response(
     exercise_id: str,
     response_data: dict,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db_manager = Depends(get_db)
 ):
     """Submit response to an exercise and get evaluation"""
     exercise = response_data.get("exercise", {})
@@ -1215,6 +1252,19 @@ async def submit_exercise_response(
         "timestamp": datetime.utcnow().isoformat()
     }
     ai_tutor.update_user_context(current_user["id"], session_data)
+    
+    # Save to database
+    try:
+        db_manager.create_progress_entry({
+            "user_id": current_user["id"],
+            "lesson_id": 0,  # Exercise, not a lesson
+            "accuracy": evaluation["score"],
+            "speed": 0,
+            "errors": evaluation.get("hints", []),
+            "session_duration": 300  # 5 minutes estimate
+        })
+    except Exception as e:
+        print(f"[ERROR] Failed to save exercise progress: {e}")
     
     # Generate encouraging response based on performance
     if evaluation["correct"]:
