@@ -16,7 +16,7 @@ class TesseractOCRProcessor:
             print("Tesseract not available")
 
     async def recognize_handwriting(self, image_path: str, language: str = "en") -> Dict[str, Any]:
-        """Recognize handwriting with character analysis"""
+        """Recognize handwriting with content validation"""
         # Input validation
         if not image_path or not isinstance(image_path, str):
             return {
@@ -60,15 +60,54 @@ class TesseractOCRProcessor:
                     "character_analysis": {"characters": []}
                 }
             
-            # Try multiple OCR approaches
-            text = self._try_multiple_ocr_configs(image, language)
+            # VALIDATE IMAGE CONTENT FIRST
+            content_validation = self._validate_image_content(image)
+            if not content_validation["is_handwriting"]:
+                return {
+                    "success": False,
+                    "error": content_validation["message"],
+                    "recognized_text": "",
+                    "confidence": 0.0,
+                    "character_analysis": {"characters": []},
+                    "content_type": content_validation["detected_type"]
+                }
+            
+            # Perform OCR with per-word tokens
+            ocr_result = self._ocr_with_tokens(image, language)
+            text = ocr_result.get("text", "")
+            tokens = ocr_result.get("tokens", [])
             
             # Always run character analysis even if OCR fails
             character_analysis = self._analyze_characters(image_path)
             
+            # Map characters to words for actionable feedback
+            mapping = self._map_characters_to_words(character_analysis.get("characters", []), tokens)
+            word_feedback = self._build_word_feedback(tokens, mapping)
+            
             # Post-process text if we got any
             if text:
                 text = self._post_process_text(text)
+            
+            # Try to generate an overlay that shows words and character issues
+            visual_overlay_path = ""
+            try:
+                visual_overlay_path = self._generate_visual_overlay_with_words(
+                    image_path,
+                    character_analysis,
+                    tokens,
+                    word_feedback
+                )
+            except Exception:
+                # Fallback to previous overlay
+                visual_overlay_path = character_analysis.get("visual_overlay_path", "")
+            
+            # Build a basic summary
+            lines_estimated = max((t.get("line_num", 1) for t in tokens), default=1)
+            content_summary = {
+                "content_type": "handwriting",
+                "lines_estimated": int(lines_estimated),
+                "text_summary": text[:120]
+            }
             
             return {
                 "success": True,
@@ -77,7 +116,10 @@ class TesseractOCRProcessor:
                 "errors": self._analyze_basic_errors(text),
                 "image_analysis": self._analyze_image_quality(image),
                 "character_analysis": character_analysis,
-                "visual_overlay_path": character_analysis.get("visual_overlay_path", "")
+                "tokens": tokens,
+                "word_feedback": word_feedback,
+                "summary": content_summary,
+                "visual_overlay_path": visual_overlay_path
             }
             
         except Exception as e:
@@ -89,6 +131,102 @@ class TesseractOCRProcessor:
                 "confidence": 0.0
             }
     
+    def _validate_image_content(self, image: Image.Image) -> Dict[str, Any]:
+        """Validate that image contains handwriting, not humans or other content"""
+        try:
+            import cv2
+            import numpy as np
+            
+            # Convert PIL to OpenCV format
+            img_array = np.array(image.convert('RGB'))
+            img_cv = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+            gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+            
+            # Check for human features (face detection)
+            try:
+                face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+                faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+                
+                if len(faces) > 0:
+                    return {
+                        "is_handwriting": False,
+                        "detected_type": "human_face",
+                        "message": "I can see a person in this image. Please upload an image of handwritten text instead."
+                    }
+            except:
+                pass  # Face detection failed, continue with other checks
+            
+            # Check image characteristics for handwriting
+            height, width = gray.shape
+            
+            # Check if image is too small for meaningful handwriting
+            if width < 100 or height < 50:
+                return {
+                    "is_handwriting": False,
+                    "detected_type": "too_small",
+                    "message": "Image is too small. Please upload a clearer image of your handwriting."
+                }
+            
+            # Analyze color distribution
+            color_std = np.std(gray)
+            if color_std < 10:  # Very uniform color (likely blank or solid color)
+                return {
+                    "is_handwriting": False,
+                    "detected_type": "uniform_color",
+                    "message": "I don't see any handwriting in this image. Please make sure there's clear text written on paper."
+                }
+            
+            # Check for text-like patterns using edge detection
+            edges = cv2.Canny(gray, 50, 150)
+            edge_density = np.sum(edges > 0) / (width * height)
+            
+            # Too many edges might indicate complex scenes (photos of people/objects)
+            if edge_density > 0.3:
+                return {
+                    "is_handwriting": False,
+                    "detected_type": "complex_scene",
+                    "message": "This looks like a photo rather than handwriting. Please upload an image of text written on paper."
+                }
+            
+            # Too few edges might indicate blank page or very faint writing
+            if edge_density < 0.01:
+                return {
+                    "is_handwriting": False,
+                    "detected_type": "no_content",
+                    "message": "I don't see any clear handwriting. Please write with darker ink and ensure good lighting."
+                }
+            
+            # Check for skin-like colors (indicates human in photo)
+            hsv = cv2.cvtColor(img_cv, cv2.COLOR_BGR2HSV)
+            
+            # Define skin color range in HSV
+            lower_skin = np.array([0, 20, 70], dtype=np.uint8)
+            upper_skin = np.array([20, 255, 255], dtype=np.uint8)
+            skin_mask = cv2.inRange(hsv, lower_skin, upper_skin)
+            skin_ratio = np.sum(skin_mask > 0) / (width * height)
+            
+            if skin_ratio > 0.15:  # More than 15% skin-colored pixels
+                return {
+                    "is_handwriting": False,
+                    "detected_type": "human_detected",
+                    "message": "I can see a person in this image. Please upload an image of handwritten text on paper instead."
+                }
+            
+            # If we get here, it's likely handwriting
+            return {
+                "is_handwriting": True,
+                "detected_type": "handwriting",
+                "message": "Image appears to contain handwriting"
+            }
+            
+        except Exception as e:
+            # If validation fails, allow processing but with warning
+            return {
+                "is_handwriting": True,
+                "detected_type": "unknown",
+                "message": f"Could not validate image content: {str(e)}"
+            }
+
     def _try_multiple_ocr_configs(self, image: Image.Image, language: str) -> str:
         """Try multiple OCR configurations to improve recognition"""
         configs = [
@@ -125,6 +263,185 @@ class TesseractOCRProcessor:
                     continue
         
         return best_text
+
+    def _ocr_with_tokens(self, image: Image.Image, language: str) -> Dict[str, Any]:
+        """Run OCR across multiple configs and return best text with per-word tokens."""
+        if not self.tesseract_available:
+            return {"text": "", "tokens": [], "mean_conf": 0.0}
+        
+        configs = [
+            '--psm 6 --oem 3',  # Uniform block of text
+            '--psm 7 --oem 3',  # Single line
+            '--psm 8 --oem 3',  # Single word
+            '--psm 3 --oem 3',  # Auto
+            '--psm 13 --oem 3', # Raw line
+        ]
+        
+        images_to_try = [
+            image,
+            self._preprocess_image(image),
+            self._preprocess_aggressive(image)
+        ]
+        
+        best = {"text": "", "tokens": [], "mean_conf": 0.0, "score": -1.0}
+        
+        for img in images_to_try:
+            for config in configs:
+                try:
+                    data = self.pytesseract.image_to_data(
+                        img,
+                        lang=language,
+                        config=config,
+                        output_type=self.pytesseract.Output.DICT
+                    )
+                    tokens = []
+                    for i in range(len(data.get('text', []))):
+                        word = (data['text'][i] or '').strip()
+                        try:
+                            conf = float(data['conf'][i]) if data['conf'][i] not in (None, '', '-1') else -1.0
+                        except Exception:
+                            conf = -1.0
+                        if word and conf >= 0:
+                            tokens.append({
+                                "word": word,
+                                "conf": conf,
+                                "bbox": [int(data['left'][i]), int(data['top'][i]), int(data['width'][i]), int(data['height'][i])],
+                                "line_num": int(data.get('line_num', [1]*len(data['text']))[i]) if 'line_num' in data else 1,
+                                "block_num": int(data.get('block_num', [1]*len(data['text']))[i]) if 'block_num' in data else 1,
+                            })
+                    if not tokens:
+                        continue
+                    # Reconstruct text by line order
+                    tokens_sorted = sorted(tokens, key=lambda t: (t['line_num'], t['bbox'][0]))
+                    text = ' '.join(t['word'] for t in tokens_sorted)
+                    mean_conf = sum(t['conf'] for t in tokens_sorted) / max(1, len(tokens_sorted))
+                    score = self._score_ocr_result(text, mean_conf)
+                    if score > best['score']:
+                        best = {"text": text, "tokens": tokens_sorted, "mean_conf": mean_conf, "score": score}
+                except Exception:
+                    continue
+        
+        return {k: best[k] for k in ("text", "tokens", "mean_conf")}
+
+    def _score_ocr_result(self, text: str, mean_conf: float) -> float:
+        """Score an OCR attempt: prefer longer sensible text with higher confidence."""
+        if not text:
+            return -1.0
+        words = [w for w in text.split() if w]
+        if not words:
+            return -1.0
+        alpha_ratio = sum(1 for w in words if any(ch.isalpha() for ch in w)) / len(words)
+        length_bonus = min(len(text) / 100.0, 1.0)
+        return 0.6 * (mean_conf / 100.0) + 0.3 * alpha_ratio + 0.1 * length_bonus
+
+    def _map_characters_to_words(self, characters: List[Dict[str, Any]], tokens: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Assign each detected character contour to the most likely word token.
+        Returns list of mappings with word_index and char_index within that word.
+        """
+        mapped = []
+        if not characters or not tokens:
+            return mapped
+        
+        # Precompute token centers and line ranges
+        def center_of(bbox):
+            x, y, w, h = bbox
+            return (x + w/2.0, y + h/2.0)
+        
+        # Group tokens by line for better alignment
+        from collections import defaultdict
+        line_to_indices = defaultdict(list)
+        for idx, t in enumerate(tokens):
+            line_to_indices[t.get('line_num', 1)].append(idx)
+        
+        # Ensure tokens have indices on each line left-to-right
+        for line, idxs in line_to_indices.items():
+            idxs.sort(key=lambda i: tokens[i]['bbox'][0])
+            for local_pos, i in enumerate(idxs):
+                tokens[i]['_line_pos'] = local_pos
+        
+        # Map each character to nearest token on same line (by y overlap) or containing bbox
+        for char in sorted(characters, key=lambda c: c.get('bbox', [0,0,0,0])[0]):
+            cb = char.get('bbox', [0,0,0,0])
+            cx, cy = center_of(cb)
+            best_word = -1
+            best_dist = float('inf')
+            best_char_index = 0
+            # Try direct containment first
+            for wi, t in enumerate(tokens):
+                x, y, w, h = t['bbox']
+                if x <= cx <= x + w and y <= cy <= y + h:
+                    best_word = wi
+                    break
+            if best_word == -1:
+                # Choose token with minimal vertical distance, then horizontal distance
+                for wi, t in enumerate(tokens):
+                    x, y, w, h = t['bbox']
+                    # Vertical distance: 0 if overlapping
+                    if (y <= cy <= y + h) or (cy <= y + h and cy >= y):
+                        vdist = 0
+                    else:
+                        vdist = min(abs(cy - y), abs(cy - (y + h)))
+                    hdist = 0 if (x <= cx <= x + w) else min(abs(cx - x), abs(cx - (x + w)))
+                    dist = vdist * 2 + hdist
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_word = wi
+            if best_word == -1:
+                continue
+            
+            # Estimate character index inside the word by relative x ordering among chars assigned to that word
+            mapped.append({
+                "word_index": best_word,
+                "char_bbox": cb,
+                "template_matches": char.get("template_matches", []),
+                "errors": char.get("errors", []),
+            })
+        
+        # Within each word, assign char_index left-to-right
+        by_word = {}
+        for i, m in enumerate(mapped):
+            by_word.setdefault(m['word_index'], []).append((i, m))
+        for wi, items in by_word.items():
+            items.sort(key=lambda it: it[1]['char_bbox'][0])
+            for local_idx, (orig_idx, m) in enumerate(items):
+                mapped[orig_idx]['char_index'] = local_idx
+        
+        return mapped
+
+    def _build_word_feedback(self, tokens: List[Dict[str, Any]], mapping: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Aggregate per-character errors into per-word actionable feedback."""
+        if not tokens:
+            return []
+        from collections import defaultdict
+        word_issues = defaultdict(list)
+        for m in mapping:
+            errs = m.get('errors', []) or []
+            if not errs:
+                continue
+            # Choose primary error description
+            primary = errs[0]
+            letter_hint = None
+            matches = m.get('template_matches', []) or []
+            if matches and matches[0].get('confidence', 0) >= 0.5:
+                letter_hint = matches[0].get('letter')
+            word_issues[m['word_index']].append({
+                "char_index": m.get('char_index', 0),
+                "letter_hint": letter_hint,
+                "description": primary.get('description', ''),
+                "suggestion": primary.get('suggestion', '')
+            })
+        
+        feedback = []
+        for wi, token in enumerate(tokens):
+            issues = sorted(word_issues.get(wi, []), key=lambda x: x['char_index'])
+            if not issues:
+                continue
+            feedback.append({
+                "word_index": wi,
+                "word": token.get('word', ''),
+                "issues": issues
+            })
+        return feedback
     
     def _preprocess_aggressive(self, image: Image.Image) -> Image.Image:
         """More aggressive preprocessing for difficult images"""
@@ -485,6 +802,59 @@ class TesseractOCRProcessor:
             
         except Exception as e:
             return f"Error: {str(e)}"
+
+    def _generate_visual_overlay_with_words(self, image_path: str, character_analysis: Dict, tokens: List[Dict[str, Any]], word_feedback: List[Dict[str, Any]]) -> str:
+        """Generate overlay that includes word boxes and indices in addition to character annotations."""
+        try:
+            import cv2
+            img = cv2.imread(image_path)
+            if img is None:
+                return ""
+            overlay = img.copy()
+            
+            # Draw word boxes
+            for i, t in enumerate(tokens):
+                x, y, w, h = t.get('bbox', [0,0,0,0])
+                cv2.rectangle(overlay, (x, y), (x+w, y+h), (255, 255, 0), 2)  # Cyan
+                cv2.putText(overlay, f"W{i}", (x, y-4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+            
+            # Draw characters as in basic overlay
+            for char in character_analysis.get("characters", []):
+                x, y, w, h = char["bbox"]
+                matches = char.get("template_matches", [])
+                errors = char.get("errors", [])
+                if errors:
+                    color = (0, 0, 255)
+                elif matches and matches[0].get("confidence", 0) > 0.7:
+                    color = (0, 255, 0)
+                elif matches and matches[0].get("confidence", 0) > 0.4:
+                    color = (0, 255, 255)
+                else:
+                    color = (255, 0, 0)
+                cv2.rectangle(overlay, (x, y), (x+w, y+h), color, 1)
+                if errors:
+                    cv2.circle(overlay, (x+w//2, y+h//2), 3, (255, 0, 255), -1)
+            
+            # Annotate issues near words
+            for wf in (word_feedback or []):
+                wi = wf.get('word_index')
+                if wi is None or wi < 0 or wi >= len(tokens):
+                    continue
+                x, y, w, h = tokens[wi].get('bbox', [0,0,0,0])
+                label = f"{wf.get('word','')}"
+                cv2.putText(overlay, label, (x, y+h+14), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
+                # Show first issue succinctly
+                if wf.get('issues'):
+                    issue = wf['issues'][0]
+                    hint = issue.get('letter_hint') or '?'
+                    desc = issue.get('description','')
+                    cv2.putText(overlay, f"c{issue.get('char_index',0)}:{hint}", (x, y+h+28), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 255), 1)
+            
+            overlay_path = image_path.replace('.', '_overlay_words.')
+            cv2.imwrite(overlay_path, overlay)
+            return overlay_path
+        except Exception as e:
+            return ""
     
     def _create_circle_template(self):
         """Create circle template"""

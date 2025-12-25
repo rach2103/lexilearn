@@ -43,7 +43,8 @@ except ImportError:
     speech_processor = MockSpeechProcessor()
 
 try:
-    from ml_models.handwriting_recognition import handwriting_recognizer
+    from ml_models.handwriting_recognition import TesseractOCRProcessor
+    handwriting_recognizer = TesseractOCRProcessor()
 except ImportError:
     class MockHandwritingRecognizer:
         async def recognize_handwriting(self, file_path, language):
@@ -479,7 +480,7 @@ async def recognize_handwriting(
         buffer.write(content)
     
     try:
-        # Get OCR result
+        # Get OCR result from the enhanced processor
         ocr_result = await handwriting_recognizer.recognize_handwriting(file_path, language)
         
         if not ocr_result.get("success"):
@@ -487,8 +488,43 @@ async def recognize_handwriting(
         
         recognized_text = ocr_result.get("recognized_text", "")
         
-        # Generate educational feedback
-        feedback = generate_handwriting_feedback(recognized_text, ocr_result)
+        # Use the enhanced word-level feedback from the recognition module
+        if "word_feedback" in ocr_result and ocr_result["word_feedback"]:
+            # Build specific feedback from word-level analysis
+            word_corrections = []
+            for word_info in ocr_result["word_feedback"]:
+                word = word_info.get("word", "")
+                issues = word_info.get("issues", [])
+                
+                for issue in issues:
+                    letter_hint = issue.get("letter_hint", "")
+                    description = issue.get("description", "")
+                    suggestion = issue.get("suggestion", "")
+                    
+                    if letter_hint and description:
+                        word_corrections.append({
+                            "original": word,
+                            "suggested": letter_hint,
+                            "reason": f"In '{word}': {description}. {suggestion}"
+                        })
+            
+            feedback = {
+                "overall_assessment": f"I can see you wrote: '{recognized_text}'",
+                "recognized_content": f"Recognized text: '{recognized_text}'",
+                "word_corrections": word_corrections,
+                "specific_improvements": [
+                    "Focus on the highlighted character issues",
+                    "Practice the letters that were unclear"
+                ],
+                "practice_suggestions": [
+                    f"Practice writing '{recognized_text}' again",
+                    "Write each word separately for clarity",
+                    "Use lined paper for better letter alignment"
+                ]
+            }
+        else:
+            # Fallback to original feedback generation
+            feedback = generate_handwriting_feedback(recognized_text, ocr_result)
         
         # Analyze text for dyslexia patterns
         text_analysis = text_analyzer.analyze_text(recognized_text) if recognized_text else {"errors": [], "corrected_text": ""}
@@ -517,7 +553,7 @@ async def correct_handwriting(
         buffer.write(content)
     
     try:
-        # Get correction result
+        # Get correction result from enhanced processor
         correction_result = await handwriting_recognizer.correct_handwriting(file_path, language)
         
         if not correction_result.get("success"):
@@ -526,11 +562,34 @@ async def correct_handwriting(
         recognized_text = correction_result.get("recognized_text", "")
         corrected_text = correction_result.get("corrected_text", recognized_text)
         
-        # Generate comprehensive feedback
-        feedback = generate_comprehensive_handwriting_feedback(recognized_text, corrected_text, correction_result)
+        # Generate comprehensive feedback using word-level analysis
+        if "word_feedback" in correction_result and correction_result["word_feedback"]:
+            # Build detailed corrections from word-level feedback
+            corrections_made = []
+            for word_info in correction_result["word_feedback"]:
+                word = word_info.get("word", "")
+                issues = word_info.get("issues", [])
+                
+                for issue in issues:
+                    letter_hint = issue.get("letter_hint", "")
+                    description = issue.get("description", "")
+                    suggestion = issue.get("suggestion", "")
+                    
+                    if description:
+                        corrections_made.append(f"In '{word}': {description}")
+            
+            feedback = generate_comprehensive_handwriting_feedback(recognized_text, corrected_text, {
+                **correction_result,
+                "corrections_applied": corrections_made
+            })
+        else:
+            feedback = generate_comprehensive_handwriting_feedback(recognized_text, corrected_text, correction_result)
         
         # Get AI tutor insights
-        ai_analysis = ai_tutor.analyze_user_input(recognized_text, {"context": "handwriting_practice"})
+        try:
+            ai_analysis = ai_tutor.analyze_user_input(recognized_text, {"context": "handwriting_practice"})
+        except:
+            ai_analysis = {"intent": "practice", "emotion": "neutral", "learning_need": "handwriting"}
         
         return {
             **correction_result,
@@ -1624,7 +1683,7 @@ async def manifest():
     }
 
 def generate_handwriting_feedback(recognized_text: str, ocr_result: dict) -> dict:
-    """Generate intelligent educational feedback based on image and text analysis"""
+    """Generate specific educational feedback about recognized text and corrections needed"""
     confidence = ocr_result.get("confidence", 0)
     errors = ocr_result.get("errors", [])
     image_analysis = ocr_result.get("image_analysis", {})
@@ -1632,95 +1691,141 @@ def generate_handwriting_feedback(recognized_text: str, ocr_result: dict) -> dic
     
     feedback = {
         "overall_assessment": "",
-        "strengths": [],
-        "areas_for_improvement": [],
-        "specific_tips": [],
-        "character_feedback": [],
-        "template_matches": []
+        "recognized_content": "",
+        "word_corrections": [],
+        "specific_improvements": [],
+        "practice_suggestions": []
     }
     
-    # Check if recognition failed due to image quality issues
-    if not recognized_text or confidence < 0.3:
-        issues = image_analysis.get("issues", [])
-        suggestions = image_analysis.get("suggestions", [])
+    # If we successfully recognized text, provide specific feedback
+    if recognized_text and confidence >= 0.3:
+        words = recognized_text.strip().split()
         
-        if issues:
-            feedback["overall_assessment"] = f"I had difficulty reading your handwriting. The main issue appears to be: {issues[0].lower()}."
-            feedback["areas_for_improvement"] = issues
-            feedback["specific_tips"] = suggestions
+        # Provide clear assessment of what was recognized
+        if len(words) == 1:
+            feedback["overall_assessment"] = f"I can see you wrote the word '{recognized_text.strip()}'. "
+            feedback["recognized_content"] = f"Recognized text: '{recognized_text.strip()}'"
+        elif len(words) > 1:
+            feedback["overall_assessment"] = f"I can see you wrote {len(words)} words: '{recognized_text.strip()}'. "
+            feedback["recognized_content"] = f"Recognized text: '{recognized_text.strip()}'"
         else:
-            feedback["overall_assessment"] = "I couldn't detect clear handwriting in this image."
-            feedback["specific_tips"] = [
-                "Ensure the handwriting is clearly visible",
-                "Use dark ink on light paper",
-                "Take the photo straight on without angle",
-                "Make sure the text fills a good portion of the image"
+            feedback["overall_assessment"] = f"I can see some handwriting: '{recognized_text.strip()}'. "
+            feedback["recognized_content"] = f"Recognized text: '{recognized_text.strip()}'"
+        
+        # Analyze confidence and provide specific word-level feedback
+        if confidence >= 0.8:
+            feedback["overall_assessment"] += "Your handwriting is very clear and easy to read!"
+            feedback["specific_improvements"] = [
+                "Excellent letter formation",
+                "Good spacing between words",
+                "Clear and legible writing"
+            ]
+        elif confidence >= 0.6:
+            feedback["overall_assessment"] += "Your handwriting is mostly clear with some areas to improve."
+            
+            # Provide specific word corrections if available
+            if errors:
+                for error in errors[:3]:  # Limit to 3 most important errors
+                    error_word = error.get("word", "")
+                    suggestion = error.get("suggestion", "")
+                    if error_word and suggestion:
+                        feedback["word_corrections"].append({
+                            "original": error_word,
+                            "suggested": suggestion,
+                            "reason": f"The word '{error_word}' might be clearer as '{suggestion}'"
+                        })
+            
+            feedback["specific_improvements"] = [
+                "Some letters could be formed more clearly",
+                "Try to maintain consistent letter size",
+                "Focus on spacing between letters"
+            ]
+        else:
+            feedback["overall_assessment"] += "I can make out some words, but the handwriting could be clearer."
+            
+            # Provide specific corrections for unclear words
+            unclear_words = []
+            if len(words) > 0:
+                for word in words:
+                    if len(word) < 2 or any(c in word for c in ['?', '*', '#']):
+                        unclear_words.append(word)
+            
+            if unclear_words:
+                feedback["word_corrections"] = [
+                    {
+                        "original": word,
+                        "suggested": "[unclear]",
+                        "reason": f"The word '{word}' is difficult to read - try writing it more clearly"
+                    } for word in unclear_words[:3]
+                ]
+            
+            feedback["specific_improvements"] = [
+                "Write more slowly and carefully",
+                "Press firmly but not too hard",
+                "Make letters larger and more distinct",
+                "Use lined paper to keep letters aligned"
             ]
         
-        # Add image-specific suggestions
+        # Add character-specific feedback if available
+        characters = character_analysis.get("characters", [])
+        if characters and len(characters) > 0:
+            char_issues = []
+            for i, char in enumerate(characters[:5]):  # Limit to first 5 characters
+                errors = char.get("errors", [])
+                if errors:
+                    char_issues.append(f"Character {i+1}: {errors[0].get('description', 'needs improvement')}")
+            
+            if char_issues:
+                feedback["specific_improvements"].extend(char_issues[:3])  # Top 3 character issues
+        
+        # Provide actionable practice suggestions
+        feedback["practice_suggestions"] = [
+            f"Practice writing the word '{words[0]}' 5 times" if words else "Practice writing individual letters",
+            "Use lined paper to keep letters the same height",
+            "Write slowly and focus on letter formation"
+        ]
+        
+        if len(words) > 1:
+            feedback["practice_suggestions"].insert(1, f"Try writing each word separately: {', '.join(words[:3])}")
+    
+    else:
+        # Handle cases where recognition failed or confidence is very low
+        issues = image_analysis.get("issues", [])
+        
+        if not recognized_text:
+            feedback["overall_assessment"] = "I couldn't read any clear handwriting in this image."
+            feedback["recognized_content"] = "No text could be recognized"
+        else:
+            feedback["overall_assessment"] = f"I can barely make out '{recognized_text.strip()}' but it's very unclear."
+            feedback["recognized_content"] = f"Unclear text: '{recognized_text.strip()}'"
+        
+        # Provide specific image quality feedback
         brightness = image_analysis.get("brightness", 128)
         contrast = image_analysis.get("contrast", 50)
-        sharpness = image_analysis.get("sharpness", 50)
+        
+        feedback["specific_improvements"] = []
         
         if brightness < 80:
-            feedback["specific_tips"].insert(0, "The image is too dark - try better lighting")
+            feedback["specific_improvements"].append("Image is too dark - use better lighting")
         elif brightness > 200:
-            feedback["specific_tips"].insert(0, "The image is too bright - reduce lighting or flash")
+            feedback["specific_improvements"].append("Image is too bright - reduce lighting")
         
         if contrast < 30:
-            feedback["specific_tips"].insert(0, "Use darker ink for better contrast")
+            feedback["specific_improvements"].append("Use darker ink for better contrast")
         
-        if sharpness < 50:
-            feedback["specific_tips"].insert(0, "Hold the camera steady to avoid blur")
+        feedback["specific_improvements"].extend([
+            "Write with dark ink on white paper",
+            "Take the photo straight on (not at an angle)",
+            "Make sure handwriting fills most of the image",
+            "Write larger and more clearly"
+        ])
         
-        return feedback
-    
-    # Normal feedback for successfully recognized text
-    if confidence >= 0.8:
-        feedback["overall_assessment"] = "Excellent handwriting! Your letters are clear and well-formed."
-        feedback["strengths"].append("Clear letter formation")
-        feedback["strengths"].append("Good spacing between words")
-    elif confidence >= 0.6:
-        feedback["overall_assessment"] = "Good handwriting with room for improvement."
-        feedback["strengths"].append("Most letters are recognizable")
-        feedback["areas_for_improvement"].append("Some letters could be clearer")
-    else:
-        feedback["overall_assessment"] = "Keep practicing! Handwriting improves with regular practice."
-        feedback["areas_for_improvement"].append("Focus on letter clarity")
-        feedback["areas_for_improvement"].append("Work on consistent letter size")
-    
-    # Specific feedback based on errors
-    if errors:
-        common_issues = {}
-        for error in errors:
-            error_type = error.get("type", "unknown")
-            common_issues[error_type] = common_issues.get(error_type, 0) + 1
-        
-        if "ocr_confusion" in common_issues:
-            feedback["areas_for_improvement"].append("Letter formation clarity")
-            feedback["specific_tips"].append("Practice writing similar-looking letters (like 'b' and 'd') separately")
-        
-        if "repetition_error" in common_issues:
-            feedback["areas_for_improvement"].append("Letter spacing")
-            feedback["specific_tips"].append("Leave small spaces between letters within words")
-    
-    # Add character-specific feedback
-    characters = character_analysis.get("characters", [])
-    if characters:
-        feedback["character_feedback"] = generate_character_feedback(characters)
-        
-        # Extract template matches for display
-        for char in characters:
-            matches = char.get("template_matches", [])
-            if matches:
-                feedback["template_matches"].extend(matches)
-    
-    # Add general tips for dyslexic learners
-    feedback["specific_tips"].extend([
-        "Use lined paper to help with letter height consistency",
-        "Take breaks every 10-15 minutes to avoid fatigue",
-        "Practice one letter at a time before writing words"
-    ])
+        feedback["practice_suggestions"] = [
+            "Try writing one word clearly and take another photo",
+            "Use a dark pen or pencil",
+            "Write on lined paper",
+            "Make letters bigger and more spaced out"
+        ]
     
     return feedback
 

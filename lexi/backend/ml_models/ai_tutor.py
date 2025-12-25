@@ -223,16 +223,30 @@ class AITutor:
         if any(re.search(pattern, message_lower) for pattern in word_request_patterns):
             return "word_request"
         
-        # Help request (only if explicitly asking for help)
-        if re.search(r"\bhelp me\b|\bneed help\b|\bcan you help\b|\bdon't understand\b|\bconfused\b|\bhow do i\b", message_lower):
-            return "help_request"
-        
-        # Practice request (including "practice more words")
-        if re.search(r"\bpractice\b.*\bwords\b|\bmore\b.*\bwords\b|\bexercise\b|\bwork on\b|\blearn\b|\bstudy\b|\btrain\b", message_lower):
+        # Practice request (including "help me practice") - BEFORE help_request
+        practice_patterns = [
+            r"\bhelp me practice\b",
+            r"\bhelp.*practice\b",
+            r"\bpractice\b.*\bwords\b",
+            r"\bmore\b.*\bwords\b",
+            r"\bexercise\b",
+            r"\bwork on\b",
+            r"\blearn\b",
+            r"\bstudy\b",
+            r"\btrain\b",
+            r"\bpractice\b"
+        ]
+        if any(re.search(pattern, message_lower) for pattern in practice_patterns):
             # Check if it's specifically asking for words
             if re.search(r"\bpractice\b.*\bwords\b|\bmore\b.*\bwords\b|\bdifferent\b.*\bwords\b|\bother\b.*\bwords\b|\bnew\b.*\bwords\b", message_lower):
                 return "word_request"
             return "practice_request"
+        
+        # Help request (only if NOT asking for practice)
+        if re.search(r"\bhelp me\b|\bneed help\b|\bcan you help\b|\bdon't understand\b|\bconfused\b|\bhow do i\b", message_lower):
+            # Make sure it's not "help me practice" which should be practice_request
+            if not re.search(r"\bhelp.*practice\b", message_lower):
+                return "help_request"
         
         # Question (has question words and question mark or starts with question word)
         if re.search(r"\?", message_lower) or re.match(r"^(what|how|why|when|where|can you|could you|will you|should i|do i)\b", message_lower):
@@ -790,16 +804,98 @@ class AITutor:
         return response
     
     def _handle_practice_request(self, analysis: Dict[str, Any], user_context: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle practice request"""
+        """Handle practice request by generating an exercise"""
         learning_need = analysis["learning_need"]
         difficulty = analysis["difficulty_level"]
+        user_id = user_context.get("user_id") if user_context else 0
+        
+        # Generate a random exercise for practice
+        import random
+        
+        # Available skill areas and exercise types
+        skill_options = {
+            "phonemic_awareness": ["sound_identification", "sound_blending", "sound_segmentation"],
+            "phonics": ["letter_sound_matching", "word_building", "decode_words"],
+            "sight_words": ["flash_cards", "sentence_completion"],
+            "reading_comprehension": ["main_idea", "detail_questions"],
+            "spelling": ["pattern_practice"],
+            "writing": ["sentence_construction"]
+        }
+        
+        # Choose skill area based on learning need or random
+        if learning_need in skill_options:
+            skill_area = learning_need
+        else:
+            skill_area = random.choice(list(skill_options.keys()))
+        
+        exercise_type = random.choice(skill_options[skill_area])
+        
+        # Generate exercise using exercise generator
+        try:
+            from .exercise_generator import exercise_generator
+            exercise = exercise_generator.generate_exercise(
+                skill_area=skill_area,
+                exercise_type=exercise_type,
+                difficulty=difficulty,
+                user_context=user_context or {}
+            )
+            
+            if "error" not in exercise:
+                # Store exercise as active
+                self.set_active_exercise(user_id, exercise)
+                
+                return {
+                    "message": f"Great! Let's practice {skill_area.replace('_', ' ')}. Here's an exercise for you:\n\n{exercise.get('instructions', '')}",
+                    "exercise": exercise,
+                    "suggestions": [
+                        "Take your time",
+                        "Read the instructions carefully",
+                        "Do your best!"
+                    ],
+                    "encouragement": "You've got this! Practice makes progress!"
+                }
+        except Exception as e:
+            print(f"[AI_TUTOR] Exercise generation failed: {e}")
+        
+        # Fallback to word practice if exercise generation fails
+        word_lists = {
+            "beginner": ["cat", "dog", "sun", "big", "red", "hop", "sit", "run", "pen", "cup"],
+            "intermediate": ["cake", "bike", "rope", "cute", "make", "like", "hope", "tube", "game", "time"],
+            "advanced": ["happy", "garden", "window", "pencil", "rabbit", "basket", "button", "kitten", "yellow", "purple"]
+        }
+        
+        selected_words = random.sample(word_lists[difficulty], min(5, len(word_lists[difficulty])))
+        
+        # Store practice words for context
+        self.last_practice_words[user_id] = selected_words
+        
+        # Set up an active writing exercise with these words
+        writing_exercise = {
+            "skill_area": "writing",
+            "exercise_type": "sentence_construction",
+            "word_bank": selected_words,
+            "instructions": f"Create a sentence using all these words: {', '.join(selected_words)}",
+            "target_words": selected_words
+        }
+        self.set_active_exercise(user_id, writing_exercise)
+        
+        # Build message with words listed
+        words_list = "\n".join([f"{i+1}. {word}" for i, word in enumerate(selected_words)])
+        message_text = f"Perfect! Let's practice with these {len(selected_words)} {difficulty} level words:\n\n{words_list}\n\n📝 **Challenge:** Try using ALL {len(selected_words)} words in a sentence! Just type your sentence below and I'll check it."
         
         return {
-            "message": f"Great! Let's practice {learning_need}. I have some perfect activities for you!",
-            "suggestions": [
-                f"Start with {difficulty} level exercises",
-                "Take breaks when you need them",
-                "Celebrate small victories!"
+            "message": message_text,
+            "practice_words": selected_words,
+            "instructions": [
+                "Use ALL the words in ONE sentence",
+                "Create a complete sentence that makes sense",
+                "Check your spelling as you go"
+            ],
+            "encouragement": "Take your time and be creative!",
+            "tips": [
+                "Start with a capital letter",
+                "End with punctuation",
+                "Make sure your sentence tells a complete thought"
             ]
         }
     

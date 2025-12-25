@@ -425,7 +425,8 @@ const ChatBot = () => {
         content: aiResponse,
         timestamp: new Date(),
         analysis: analysis,
-        fullData: fullAIData
+        fullData: fullAIData,
+        overlayUrl: handwritingResult && handwritingResult.visual_overlay_path
       };
 
       setMessages(prev => [...prev, aiMessage]);
@@ -603,6 +604,26 @@ const ChatBot = () => {
       if (handwritingResult.recognized_text) {
         response += `**Recognized Text:** "${handwritingResult.recognized_text}"\n\n`;
         
+        // Add specific word-level feedback when available
+        if (handwritingResult.word_feedback && handwritingResult.word_feedback.length > 0) {
+          response += `**🔎 Specific Feedback by Word:**\n`;
+          handwritingResult.word_feedback.slice(0, 6).forEach((wf) => {
+            const idx = (wf.word_index ?? 0) + 1;
+            response += `• Word ${idx} '${wf.word}':\n`;
+            wf.issues.slice(0, 3).forEach(issue => {
+              const hint = issue.letter_hint ? ` '${issue.letter_hint}'` : '';
+              response += `   - char ${issue.char_index}${hint}: ${issue.description}; ${issue.suggestion}\n`;
+            });
+          });
+          response += `\n`;
+        } else if (handwritingResult.tokens && handwritingResult.tokens.length > 0) {
+          // If no issues, but words detected, show low-confidence words to re-write
+          const low = handwritingResult.tokens.filter(t => (t.conf ?? 100) < 50).slice(0, 5);
+          if (low.length > 0) {
+            response += `**🧪 Words to rewrite (low OCR confidence):** ${low.map(t => `'${t.word}'`).join(', ')}\n\n`;
+          }
+        }
+
         // Add educational feedback
         if (handwritingResult.educational_feedback) {
           const feedback = handwritingResult.educational_feedback;
@@ -674,31 +695,55 @@ const ChatBot = () => {
           }
         }
         
-        response += `**Confidence Level:** ${Math.round((handwritingResult.confidence || 0) * 100)}%\n\n`;
-        response += `Great job practicing your handwriting! Keep it up! 🌟`;
+        response += `**Confidence Level:** ${Math.round((handwritingResult.confidence || 0) * 100)}%\n`;
+        if (handwritingResult.visual_overlay_path) {
+          response += `🖼️ Annotated overlay saved at: ${handwritingResult.visual_overlay_path}\n`;
+        }
+        response += `\nGreat job practicing your handwriting! Keep it up! 🌟`;
       } else {
-        // Show specific image quality issues
-        const charAnalysis = handwritingResult.character_analysis;
-        if (charAnalysis && charAnalysis.characters && charAnalysis.characters.length > 0) {
-          response += `I found ${charAnalysis.characters.length} character(s) but couldn't read them clearly.\n\n`;
-          response += `**Character Detection Issues:**\n`;
-          charAnalysis.characters.slice(0, 2).forEach((char, index) => {
-            if (char.errors && char.errors.length > 0) {
-              response += `• Character ${index + 1}: ${char.errors[0].description}\n`;
-            }
+        // Prefer specific word-level feedback if available
+        if (handwritingResult.word_feedback && handwritingResult.word_feedback.length > 0) {
+          response += `**🔎 Specific Feedback by Word:**\n`;
+          handwritingResult.word_feedback.slice(0, 8).forEach((wf) => {
+            const idx = (wf.word_index ?? 0) + 1;
+            response += `• Word ${idx} '${wf.word}':\n`;
+            wf.issues.slice(0, 3).forEach(issue => {
+              const hint = issue.letter_hint ? ` '${issue.letter_hint}'` : '';
+              response += `   - char ${issue.char_index}${hint}: ${issue.description}; ${issue.suggestion}\n`;
+            });
           });
           response += `\n`;
+        } else if (handwritingResult.tokens && handwritingResult.tokens.length > 0) {
+          // Show detected words with confidence
+          response += `Detected words:\n`;
+          handwritingResult.tokens.slice(0, 10).forEach((t, i) => {
+            response += `• Word ${i + 1} '${t.word}' (conf=${Math.round((t.conf ?? 0))})\n`;
+          });
+          response += `\nTry rewriting the words with darker ink and more spacing where confidence is low.\n\n`;
         } else {
-          response += `I had trouble detecting any characters in this image.\n\n`;
+          // Fall back to character-level and general guidance
+          const charAnalysis = handwritingResult.character_analysis;
+          if (charAnalysis && charAnalysis.characters && charAnalysis.characters.length > 0) {
+            response += `I found ${charAnalysis.characters.length} character(s) but couldn't read them clearly.\n\n`;
+            response += `**Character Detection Issues:**\n`;
+            charAnalysis.characters.slice(0, 2).forEach((char, index) => {
+              if (char.errors && char.errors.length > 0) {
+                response += `• Character ${index + 1}: ${char.errors[0].description}\n`;
+              }
+            });
+            response += `\n`;
+          } else {
+            response += `I had trouble detecting any characters in this image.\n\n`;
+          }
+          
+          response += `**Try these improvements:**\n`;
+          response += `• Ensure good lighting\n`;
+          response += `• Write clearly with dark ink\n`;
+          response += `• Avoid shadows or glare\n`;
+          response += `• Take the photo straight on\n`;
+          response += `• Make letters larger and more spaced out\n\n`;
+          response += `Feel free to try again with another image!`;
         }
-        
-        response += `**Try these improvements:**\n`;
-        response += `• Ensure good lighting\n`;
-        response += `• Write clearly with dark ink\n`;
-        response += `• Avoid shadows or glare\n`;
-        response += `• Take the photo straight on\n`;
-        response += `• Make letters larger and more spaced out\n\n`;
-        response += `Feel free to try again with another image!`;
       }
       
       return response;
@@ -898,6 +943,17 @@ const ChatBot = () => {
                 <div className="text-dyslexic-base whitespace-pre-wrap">
                   {message.content}
                 </div>
+
+                {/* Annotated overlay image if provided */}
+                {message.overlayUrl && (
+                  <div className="mt-3">
+                    <img
+                      src={message.overlayUrl}
+                      alt="Annotated overlay"
+                      className="max-w-full h-auto rounded border"
+                    />
+                  </div>
+                )}
 
                 {/* Analysis results */}
                 {message.analysis && message.analysis.errors && message.analysis.errors.length > 0 && (
