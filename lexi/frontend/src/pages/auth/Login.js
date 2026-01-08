@@ -207,8 +207,6 @@ const Login = () => {
             <li>• High contrast mode available</li>
             <li>• Dyslexia-friendly fonts</li>
             <li>• Adjustable text size and spacing</li>
-            <li>• Screen reader compatible</li>
-            <li>• Keyboard navigation support</li>
           </ul>
         </div>
       </div>

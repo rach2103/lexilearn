@@ -16,6 +16,9 @@ import {
 const Progress = () => {
   const { user } = useAuth();
   const { getTotalTime } = useTimeTracking();
+  const [showImprovementModal, setShowImprovementModal] = useState(false);
+  const [newImprovementText, setNewImprovementText] = useState('');
+  const [improvementItems, setImprovementItems] = useState([]);
   const [progressData, setProgressData] = useState({
     weeklyProgress: [],
     skillProgress: [],
@@ -29,6 +32,48 @@ const Progress = () => {
   });
 
   const pollingRef = useRef(null);
+
+  // Load improvement items from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('improvementItems');
+    if (saved) {
+      setImprovementItems(JSON.parse(saved));
+    }
+  }, []);
+
+  // Save improvement items to localStorage
+  const saveImprovementItems = (items) => {
+    localStorage.setItem('improvementItems', JSON.stringify(items));
+    setImprovementItems(items);
+  };
+
+  const addImprovementItem = () => {
+    if (!newImprovementText.trim()) return;
+    
+    const newItem = {
+      id: Date.now(),
+      text: newImprovementText.trim(),
+      completed: false,
+      createdAt: new Date().toISOString()
+    };
+    
+    const updatedItems = [...improvementItems, newItem];
+    saveImprovementItems(updatedItems);
+    setNewImprovementText('');
+    setShowImprovementModal(false);
+  };
+
+  const toggleImprovementItem = (id) => {
+    const updatedItems = improvementItems.map(item =>
+      item.id === id ? { ...item, completed: !item.completed } : item
+    );
+    saveImprovementItems(updatedItems);
+  };
+
+  const removeImprovementItem = (id) => {
+    const updatedItems = improvementItems.filter(item => item.id !== id);
+    saveImprovementItems(updatedItems);
+  };
 
   const getColorClasses = (color) => {
     const colors = {
@@ -223,66 +268,85 @@ const Progress = () => {
         </div>
 
         {/* Skill Progress and Achievements */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Skill Progress */}
+        <div className="grid grid-cols-1 lg:grid-cols-1 gap-8">
+          {/* Things to Improve */}
           <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
-            <h2 className="text-dyslexic-xl font-bold text-gray-900 mb-6">
-              Skill Progress
-            </h2>
-            <div className="space-y-6">
-              {progressData.skillProgress.map((skill, index) => (
-                <div key={index}>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-dyslexic-base font-medium text-gray-700">
-                      {skill.skill}
-                    </span>
-                    <span className="text-dyslexic-sm text-gray-500">
-                      {skill.current}% / {skill.target}%
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-3">
-                    <div 
-                      className={`h-3 rounded-full ${getColorClasses(skill.color)}`}
-                      style={{ width: `${(skill.current / skill.target) * 100}%` }}
-                    ></div>
-                  </div>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-dyslexic-xl font-bold text-gray-900">
+                Things to Improve
+              </h2>
+              <button
+                onClick={() => setShowImprovementModal(true)}
+                className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors"
+              >
+                Add Item
+              </button>
+            </div>
+            <div className="space-y-3">
+              {improvementItems.map((item) => (
+                <div key={item.id} className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
+                  <input
+                    type="checkbox"
+                    checked={item.completed}
+                    onChange={() => toggleImprovementItem(item.id)}
+                    className="h-5 w-5 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                  />
+                  <span className={`flex-1 text-dyslexic-base ${
+                    item.completed ? 'line-through text-gray-500' : 'text-gray-900'
+                  }`}>
+                    {item.text}
+                  </span>
+                  <button
+                    onClick={() => removeImprovementItem(item.id)}
+                    className="text-red-500 hover:text-red-700"
+                  >
+                    ×
+                  </button>
                 </div>
               ))}
-            </div>
-          </div>
-
-          {/* Achievements */}
-          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
-            <h2 className="text-dyslexic-xl font-bold text-gray-900 mb-6">
-              Recent Achievements
-            </h2>
-            <div className="space-y-4">
-              {progressData.achievements.map((achievement) => {
-                const Icon = achievement.icon;
-                return (
-                  <div key={achievement.id} className="flex items-start space-x-4 p-4 bg-gray-50 rounded-lg">
-                    <div className="flex-shrink-0">
-                      <div className="p-2 bg-yellow-100 rounded-lg">
-                        <Icon className="text-yellow-600" size={20} />
-                      </div>
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="text-dyslexic-base font-semibold text-gray-900">
-                        {achievement.title}
-                      </h3>
-                      <p className="text-dyslexic-sm text-gray-600">
-                        {achievement.description}
-                      </p>
-                      <p className="text-dyslexic-sm text-gray-500 mt-1">
-                        {new Date(achievement.date).toLocaleDateString()}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
+              {improvementItems.length === 0 && (
+                <p className="text-gray-500 text-center py-8">
+                  No improvement items yet. Click "Add Item" to get started!
+                </p>
+              )}
             </div>
           </div>
         </div>
+
+        {/* Improvement Modal */}
+        {showImprovementModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center" onClick={() => setShowImprovementModal(false)}>
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+              <div className="p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                  Add Something to Improve
+                </h3>
+                <textarea
+                  value={newImprovementText}
+                  onChange={(e) => setNewImprovementText(e.target.value)}
+                  placeholder="What would you like to work on?"
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  rows={3}
+                />
+                <div className="flex justify-end space-x-3 mt-4">
+                  <button
+                    onClick={() => setShowImprovementModal(false)}
+                    className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={addImprovementItem}
+                    disabled={!newImprovementText.trim()}
+                    className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Detailed Analytics */}
         <div className="mt-8 bg-white rounded-xl shadow-sm p-6 border border-gray-200">

@@ -657,40 +657,44 @@ class TesseractOCRProcessor:
         return cv2.isContourConvex(contour) or len(contour) > 20
     
     def _enhanced_template_match(self, char_img, features) -> List[Dict[str, Any]]:
-        """Enhanced template matching with feature-based reasoning"""
+        """OCR-based character recognition instead of template matching"""
         try:
-            import cv2
+            import pytesseract
+            from PIL import Image
             import numpy as np
             
             if char_img.shape[0] == 0 or char_img.shape[1] == 0:
                 return []
             
-            char_resized = cv2.resize(char_img, (32, 32))
+            # Convert to PIL Image for Tesseract
+            pil_img = Image.fromarray(char_img)
             
-            # Extended template set
-            templates = {
-                'O': self._create_circle_template(),
-                'I': self._create_line_template(),
-                'b': self._create_b_template(),
-                'd': self._create_d_template(),
-                'p': self._create_p_template()
-            }
+            # Use Tesseract to recognize single character
+            config = '--psm 10 -c tessedit_char_whitelist=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
             
-            matches = []
-            for letter, template in templates.items():
-                result = cv2.matchTemplate(char_resized, template, cv2.TM_CCOEFF_NORMED)
-                _, max_val, _, _ = cv2.minMaxLoc(result)
+            try:
+                # Get character and confidence from Tesseract
+                data = pytesseract.image_to_data(pil_img, config=config, output_type=pytesseract.Output.DICT)
                 
-                if max_val > 0.25:
-                    reasoning = self._get_match_reasoning(letter, features)
-                    matches.append({
-                        "letter": letter,
-                        "confidence": float(max_val),
-                        "reasoning": reasoning
-                    })
-            
-            return sorted(matches, key=lambda x: x["confidence"], reverse=True)[:3]
-        except:
+                matches = []
+                for i in range(len(data['text'])):
+                    char = data['text'][i].strip()
+                    conf = float(data['conf'][i]) if data['conf'][i] not in (None, '', '-1') else 0
+                    
+                    if char and conf > 10:  # Very low threshold
+                        matches.append({
+                            "letter": char.lower(),
+                            "confidence": conf / 100.0,
+                            "reasoning": f"OCR recognition of '{char}'"
+                        })
+                
+                return sorted(matches, key=lambda x: x["confidence"], reverse=True)[:3]
+                
+            except:
+                return []
+                
+        except ImportError:
+            # Fallback to simple template matching if Tesseract not available
             return []
     
     def _get_match_reasoning(self, letter: str, features: Dict) -> str:
@@ -856,20 +860,129 @@ class TesseractOCRProcessor:
         except Exception as e:
             return ""
     
-    def _create_circle_template(self):
-        """Create circle template"""
+    def _create_a_template(self):
         import cv2
         import numpy as np
         template = np.zeros((32, 32), dtype=np.uint8)
-        cv2.circle(template, (16, 16), 12, 255, 2)
+        cv2.ellipse(template, (16, 20), (8, 8), 0, 0, 360, 255, 2)
+        cv2.line(template, (24, 12), (24, 28), 255, 2)
         return template
     
-    def _create_line_template(self):
-        """Create line template"""
+    def _create_c_template(self):
+        import cv2
+        import numpy as np
+        template = np.zeros((32, 32), dtype=np.uint8)
+        cv2.ellipse(template, (16, 16), (8, 8), 0, 45, 315, 255, 2)
+        return template
+    
+    def _create_e_template(self):
+        import cv2
+        import numpy as np
+        template = np.zeros((32, 32), dtype=np.uint8)
+        cv2.ellipse(template, (16, 16), (8, 8), 0, 0, 360, 255, 2)
+        cv2.line(template, (16, 16), (24, 16), 255, 2)
+        return template
+    
+    def _create_g_template(self):
+        import cv2
+        import numpy as np
+        template = np.zeros((32, 32), dtype=np.uint8)
+        cv2.ellipse(template, (16, 16), (8, 8), 0, 0, 360, 255, 2)
+        cv2.line(template, (24, 16), (24, 30), 255, 2)
+        return template
+    
+    def _create_h_template(self):
+        import cv2
+        import numpy as np
+        template = np.zeros((32, 32), dtype=np.uint8)
+        cv2.line(template, (8, 4), (8, 28), 255, 2)
+        cv2.line(template, (24, 12), (24, 28), 255, 2)
+        cv2.line(template, (8, 16), (24, 16), 255, 2)
+        return template
+    
+    def _create_i_template(self):
+        import cv2
+        import numpy as np
+        template = np.zeros((32, 32), dtype=np.uint8)
+        cv2.line(template, (16, 12), (16, 28), 255, 2)
+        cv2.circle(template, (16, 8), 2, 255, -1)
+        return template
+    
+    def _create_l_template(self):
         import cv2
         import numpy as np
         template = np.zeros((32, 32), dtype=np.uint8)
         cv2.line(template, (16, 4), (16, 28), 255, 2)
+        return template
+    
+    def _create_m_template(self):
+        import cv2
+        import numpy as np
+        template = np.zeros((32, 32), dtype=np.uint8)
+        cv2.line(template, (8, 12), (8, 28), 255, 2)
+        cv2.line(template, (16, 12), (16, 28), 255, 2)
+        cv2.line(template, (24, 12), (24, 28), 255, 2)
+        cv2.ellipse(template, (12, 16), (4, 4), 0, 0, 180, 255, 2)
+        cv2.ellipse(template, (20, 16), (4, 4), 0, 0, 180, 255, 2)
+        return template
+    
+    def _create_n_template(self):
+        import cv2
+        import numpy as np
+        template = np.zeros((32, 32), dtype=np.uint8)
+        cv2.line(template, (8, 12), (8, 28), 255, 2)
+        cv2.line(template, (24, 12), (24, 28), 255, 2)
+        cv2.ellipse(template, (16, 16), (8, 4), 0, 0, 180, 255, 2)
+        return template
+    
+    def _create_o_template(self):
+        import cv2
+        import numpy as np
+        template = np.zeros((32, 32), dtype=np.uint8)
+        cv2.ellipse(template, (16, 16), (8, 8), 0, 0, 360, 255, 2)
+        return template
+    
+    def _create_r_template(self):
+        import cv2
+        import numpy as np
+        template = np.zeros((32, 32), dtype=np.uint8)
+        cv2.line(template, (8, 12), (8, 28), 255, 2)
+        cv2.ellipse(template, (16, 16), (8, 4), 0, 270, 90, 255, 2)
+        return template
+    
+    def _create_s_template(self):
+        import cv2
+        import numpy as np
+        template = np.zeros((32, 32), dtype=np.uint8)
+        cv2.ellipse(template, (16, 14), (6, 4), 0, 180, 360, 255, 2)
+        cv2.ellipse(template, (16, 22), (6, 4), 0, 0, 180, 255, 2)
+        return template
+    
+    def _create_t_template(self):
+        import cv2
+        import numpy as np
+        template = np.zeros((32, 32), dtype=np.uint8)
+        cv2.line(template, (16, 8), (16, 28), 255, 2)
+        cv2.line(template, (8, 12), (24, 12), 255, 2)
+        return template
+    
+    def _create_u_template(self):
+        import cv2
+        import numpy as np
+        template = np.zeros((32, 32), dtype=np.uint8)
+        cv2.line(template, (8, 12), (8, 24), 255, 2)
+        cv2.line(template, (24, 12), (24, 28), 255, 2)
+        cv2.ellipse(template, (16, 24), (8, 4), 0, 0, 180, 255, 2)
+        return template
+    
+    def _create_w_template(self):
+        import cv2
+        import numpy as np
+        template = np.zeros((32, 32), dtype=np.uint8)
+        cv2.line(template, (6, 12), (10, 28), 255, 2)
+        cv2.line(template, (10, 28), (16, 20), 255, 2)
+        cv2.line(template, (16, 20), (22, 28), 255, 2)
+        cv2.line(template, (22, 28), (26, 12), 255, 2)
         return template
     
     def _create_b_template(self):

@@ -596,6 +596,18 @@ const ChatBot = () => {
 
     const textLower = text ? text.toLowerCase() : '';
     
+    // Helper function to guess letter from error description
+    const guessLetterFromError = (description) => {
+      if (description.includes('curve') || description.includes('circular')) return 'o';
+      if (description.includes('loop') && description.includes('upper')) return 'b';
+      if (description.includes('loop') && description.includes('lower')) return 'p';
+      if (description.includes('vertical') || description.includes('line')) return 'i';
+      if (description.includes('incomplete') && description.includes('curve')) return 'c';
+      if (description.includes('broken')) return 'n';
+      if (description.includes('irregular')) return 'a';
+      return 'e'; // Most common vowel as fallback
+    };
+    
     // Handle practice word requests
     if (textLower.includes('give') && textLower.includes('words') && textLower.includes('practice')) {
       // Generate practice words based on recent exercises or common patterns
@@ -784,14 +796,35 @@ const ChatBot = () => {
           // Fall back to character-level and general guidance
           const charAnalysis = handwritingResult.character_analysis;
           if (charAnalysis && charAnalysis.characters && charAnalysis.characters.length > 0) {
-            response += `I found ${charAnalysis.characters.length} character(s) but couldn't read them clearly.\n\n`;
-            response += `**Character Detection Issues:**\n`;
-            charAnalysis.characters.slice(0, 2).forEach((char, index) => {
-              if (char.errors && char.errors.length > 0) {
-                response += `• Character ${index + 1}: ${char.errors[0].description}\n`;
+            response += `I can see your handwriting! Here's what I found:\n\n`;
+            
+            if (handwritingResult.recognized_text) {
+              response += `**📝 Text I could read:** "${handwritingResult.recognized_text}"\n\n`;
+              
+              // Provide specific feedback based on recognized text
+              const words = handwritingResult.recognized_text.split(' ').filter(w => w.length > 0);
+              if (words.length > 0) {
+                response += `**🎯 Specific feedback:**\n`;
+                words.slice(0, 3).forEach((word, index) => {
+                  response += `• Word "${word}": Good job writing this word!\n`;
+                });
+                response += `\n`;
               }
-            });
-            response += `\n`;
+            } else {
+              response += `I can see handwriting shapes but couldn't read the specific words clearly.\n\n`;
+            }
+            
+            response += `**💡 General tips for clearer handwriting:**\n`;
+            response += `• Write with darker ink or pencil\n`;
+            response += `• Make letters larger and more spaced out\n`;
+            response += `• Take photos with good lighting\n`;
+            response += `• Keep practicing - you're doing great! 🌟\n\n`;
+            
+            if (handwritingResult.confidence && handwritingResult.confidence < 0.4) {
+              response += `The image was a bit unclear, but I can still help you practice!`;
+            } else {
+              response += `Keep up the excellent work with your handwriting practice!`;
+            }
           } else {
             response += `I had trouble detecting any characters in this image.\n\n`;
           }
