@@ -98,8 +98,22 @@ const ChatBot = () => {
           const restoredMessages = [];
           let messageId = 1;
           
-          response.data.history_by_date.forEach((dateGroup) => {
-            dateGroup.messages.forEach((item) => {
+          // Ensure overall chronological order across days: sort dates ascending
+          const sortedByDateAsc = [...response.data.history_by_date].sort((a, b) => {
+            const ad = new Date(a.date).getTime();
+            const bd = new Date(b.date).getTime();
+            return (isNaN(ad) ? 0 : ad) - (isNaN(bd) ? 0 : bd);
+          });
+
+          sortedByDateAsc.forEach((dateGroup) => {
+            // Sort messages within the day by timestamp ascending
+            const sortedItems = [...(dateGroup.messages || [])].sort((a, b) => {
+              const at = new Date(a.timestamp).getTime();
+              const bt = new Date(b.timestamp).getTime();
+              return (isNaN(at) ? 0 : at) - (isNaN(bt) ? 0 : bt);
+            });
+
+            sortedItems.forEach((item) => {
               // Add user message
               restoredMessages.push({
                 id: messageId++,
@@ -159,10 +173,16 @@ const ChatBot = () => {
 
   // Load specific date's messages
   const loadDateMessages = (dateGroup) => {
+    const sortedItems = [...(dateGroup.messages || [])].sort((a, b) => {
+      const at = new Date(a.timestamp).getTime();
+      const bt = new Date(b.timestamp).getTime();
+      return (isNaN(at) ? 0 : at) - (isNaN(bt) ? 0 : bt);
+    });
+
     const messages = [];
     let messageId = 1;
     
-    dateGroup.messages.forEach((item) => {
+    sortedItems.forEach((item) => {
       messages.push({
         id: messageId++,
         type: 'user',
@@ -198,19 +218,94 @@ const ChatBot = () => {
     }
   };
 
-  // Text-to-speech function
+  // Get selected text or latest AI message
+  const getLatestAIText = () => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].type === 'ai' && typeof messages[i].content === 'string') {
+        return messages[i].content;
+      }
+    }
+    return '';
+  };
+
+  const stopSpeaking = () => {
+    try {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+    } catch {}
+    setIsReading(false);
+  };
+
+  // Text-to-speech function with browser speechSynthesis fallback
   const speakText = async (text) => {
+    const safeText = (text || '').toString().trim();
+    if (!safeText) {
+      toast.error('Nothing to read');
+      return;
+    }
+
+    // Prefer browser TTS for low latency
+    try {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        // Cancel any ongoing
+        window.speechSynthesis.cancel();
+
+        const utterance = new SpeechSynthesisUtterance(safeText);
+        // Voice selection matching settings.language if available
+        const selectVoice = (langPref) => {
+          const voices = window.speechSynthesis.getVoices();
+          if (!voices || voices.length === 0) return null;
+          if (langPref) {
+            const exact = voices.find(v => v.lang && v.lang.toLowerCase() === langPref.toLowerCase());
+            if (exact) return exact;
+            const base = langPref.split('-')[0].toLowerCase();
+            const match = voices.find(v => v.lang && v.lang.toLowerCase().startsWith(base));
+            if (match) return match;
+          }
+          return voices[0];
+        };
+        const voice = selectVoice(settings.language || 'en-US');
+        if (voice) utterance.voice = voice;
+        // Dyslexia-friendly defaults
+        utterance.rate = 0.95;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+
+        utterance.onstart = () => setIsReading(true);
+        utterance.onend = () => setIsReading(false);
+        utterance.onerror = (e) => {
+          console.error('speechSynthesis error', e);
+          setIsReading(false);
+          toast.error('Failed to read text aloud');
+        };
+
+        window.speechSynthesis.speak(utterance);
+        return;
+      }
+    } catch (err) {
+      console.error('speechSynthesis usage failed, will fallback', err);
+    }
+
+    // Fallback to backend-generated audio
     try {
       setIsReading(true);
-      const response = await axios.post('/api/text-to-speech', { text });
-      
-      if (response.data.success && response.data.audio_file_path) {
+      const response = await axios.post('/api/text-to-speech', { text: safeText });
+      if (response.data && response.data.success && response.data.audio_file_path) {
         const audio = new Audio(response.data.audio_file_path);
+        audioRef.current = audio;
         audio.onended = () => setIsReading(false);
-        audio.play();
+        await audio.play();
+      } else {
+        setIsReading(false);
+        toast.error('TTS not available');
       }
     } catch (error) {
-      console.error('Text-to-speech error:', error);
+      console.error('Text-to-speech fallback error:', error);
       setIsReading(false);
       toast.error('Failed to read text aloud');
     }
@@ -995,9 +1090,18 @@ const ChatBot = () => {
               <FiX size={20} />
             </button>
             <button
-              onClick={() => settings.textToSpeech && speakText("Welcome to LexiLearn AI Chat")}
+              onClick={() => {
+                if (!settings.textToSpeech) return;
+                if (isReading) {
+                  stopSpeaking();
+                  return;
+                }
+                const selection = (typeof window !== 'undefined' && window.getSelection) ? window.getSelection().toString().trim() : '';
+                const toRead = selection || getLatestAIText() || 'Welcome to LexiLearn AI Chat';
+                speakText(toRead);
+              }}
               className="p-2 text-gray-500 hover:text-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-500 rounded-lg"
-              aria-label="Read welcome message"
+              aria-label="Read AI message"
             >
               {isReading ? <FiVolumeX size={20} /> : <FiVolume2 size={20} />}
             </button>
@@ -1032,9 +1136,27 @@ const ChatBot = () => {
                   </div>
                 )}
 
-                {/* Message content */}
-                <div className="text-dyslexic-base whitespace-pre-wrap">
+                {/* Message content with per-message TTS for AI messages */}
+                <div className="text-dyslexic-base whitespace-pre-wrap relative">
                   {message.content}
+                  {message.type === 'ai' && (
+                    <button
+                      onClick={() => {
+                        const txt = (typeof message.content === 'string') ? message.content : '';
+                        if (!txt) return;
+                        if (isReading) {
+                          stopSpeaking();
+                        } else {
+                          speakText(txt);
+                        }
+                      }}
+                      className={`absolute -top-2 -right-2 p-1.5 rounded-full border text-gray-600 hover:text-primary-700 hover:border-primary-300 ${isReading ? 'bg-primary-50' : 'bg-white'} shadow-sm`}
+                      title="Read this message"
+                      aria-label="Read this message"
+                    >
+                      {isReading ? <FiVolumeX size={16} /> : <FiVolume2 size={16} />}
+                    </button>
+                  )}
                 </div>
 
                 {/* Annotated overlay image if provided */}

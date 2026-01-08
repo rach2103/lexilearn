@@ -60,17 +60,12 @@ class TesseractOCRProcessor:
                     "character_analysis": {"characters": []}
                 }
             
-            # VALIDATE IMAGE CONTENT FIRST
+            # VALIDATE IMAGE CONTENT FIRST (non-blocking)
             content_validation = self._validate_image_content(image)
-            if not content_validation["is_handwriting"]:
-                return {
-                    "success": False,
-                    "error": content_validation["message"],
-                    "recognized_text": "",
-                    "confidence": 0.0,
-                    "character_analysis": {"characters": []},
-                    "content_type": content_validation["detected_type"]
-                }
+            validation_warning = None
+            if not content_validation.get("is_handwriting", True):
+                # Do not fail early; proceed with OCR but keep the warning for context
+                validation_warning = content_validation.get("message")
             
             # Perform OCR with per-word tokens
             ocr_result = self._ocr_with_tokens(image, language)
@@ -79,6 +74,15 @@ class TesseractOCRProcessor:
             
             # Always run character analysis even if OCR fails
             character_analysis = self._analyze_characters(image_path)
+            
+            # If OCR text is empty, attempt to assemble text from detected characters (big isolated letters)
+            if (not text or not text.strip()) and character_analysis.get("characters"):
+                try:
+                    assembled = self._assemble_text_from_characters(character_analysis.get("characters", []))
+                    if assembled:
+                        text = assembled
+                except Exception:
+                    pass
             
             # Map characters to words for actionable feedback
             mapping = self._map_characters_to_words(character_analysis.get("characters", []), tokens)
@@ -109,7 +113,7 @@ class TesseractOCRProcessor:
                 "text_summary": text[:120]
             }
             
-            return {
+            result = {
                 "success": True,
                 "recognized_text": text,
                 "confidence": self._estimate_confidence(text),
@@ -121,6 +125,9 @@ class TesseractOCRProcessor:
                 "summary": content_summary,
                 "visual_overlay_path": visual_overlay_path
             }
+            if validation_warning:
+                result["validation_warning"] = validation_warning
+            return result
             
         except Exception as e:
             return {
@@ -265,23 +272,44 @@ class TesseractOCRProcessor:
         return best_text
 
     def _ocr_with_tokens(self, image: Image.Image, language: str) -> Dict[str, Any]:
-        """Run OCR across multiple configs and return best text with per-word tokens."""
+        """Run OCR across multiple configs and return best text with per-word tokens.
+        Adds sparse-text modes, tries inverted images, and falls back to image_to_string when needed.
+        """
         if not self.tesseract_available:
             return {"text": "", "tokens": [], "mean_conf": 0.0}
         
         configs = [
-            '--psm 6 --oem 3',  # Uniform block of text
-            '--psm 7 --oem 3',  # Single line
-            '--psm 8 --oem 3',  # Single word
-            '--psm 3 --oem 3',  # Auto
-            '--psm 13 --oem 3', # Raw line
+            '--psm 6 --oem 3',   # Uniform block of text
+            '--psm 4 --oem 3',   # Single column of text
+            '--psm 7 --oem 3',   # Single line
+            '--psm 8 --oem 3',   # Single word
+            '--psm 11 --oem 3',  # Sparse text
+            '--psm 12 --oem 3',  # Sparse text with OSD
+            '--psm 3 --oem 3',   # Auto
+            '--psm 13 --oem 3',  # Raw line
         ]
+        
+        def _invert(pil_img: Image.Image) -> Image.Image:
+            from PIL import ImageOps
+            if pil_img.mode == 'RGBA':
+                r, g, b, a = pil_img.split()
+                rgb = Image.merge('RGB', (r, g, b))
+                inv = ImageOps.invert(rgb)
+                r2, g2, b2 = inv.split()
+                return Image.merge('RGBA', (r2, g2, b2, a))
+            elif pil_img.mode == 'LA':
+                l, a = pil_img.split()
+                return Image.merge('LA', (ImageOps.invert(l), a))
+            else:
+                return ImageOps.invert(pil_img.convert('RGB')).convert(pil_img.mode if pil_img.mode != 'RGB' else 'RGB')
         
         images_to_try = [
             image,
             self._preprocess_image(image),
             self._preprocess_aggressive(image)
         ]
+        # Also try inverted versions (some preprocessors may produce white text on black background)
+        images_to_try += [_invert(img) for img in images_to_try]
         
         best = {"text": "", "tokens": [], "mean_conf": 0.0, "score": -1.0}
         
@@ -295,7 +323,8 @@ class TesseractOCRProcessor:
                         output_type=self.pytesseract.Output.DICT
                     )
                     tokens = []
-                    for i in range(len(data.get('text', []))):
+                    n = len(data.get('text', []))
+                    for i in range(n):
                         word = (data['text'][i] or '').strip()
                         try:
                             conf = float(data['conf'][i]) if data['conf'][i] not in (None, '', '-1') else -1.0
@@ -306,20 +335,45 @@ class TesseractOCRProcessor:
                                 "word": word,
                                 "conf": conf,
                                 "bbox": [int(data['left'][i]), int(data['top'][i]), int(data['width'][i]), int(data['height'][i])],
-                                "line_num": int(data.get('line_num', [1]*len(data['text']))[i]) if 'line_num' in data else 1,
-                                "block_num": int(data.get('block_num', [1]*len(data['text']))[i]) if 'block_num' in data else 1,
+                                "line_num": int(data.get('line_num', [1]*n)[i]) if 'line_num' in data else 1,
+                                "block_num": int(data.get('block_num', [1]*n)[i]) if 'block_num' in data else 1,
+                                "par_num": int(data.get('par_num', [1]*n)[i]) if 'par_num' in data else 1,
+                                "word_num": int(data.get('word_num', [i+1]*n)[i])
                             })
                     if not tokens:
                         continue
-                    # Reconstruct text by line order
-                    tokens_sorted = sorted(tokens, key=lambda t: (t['line_num'], t['bbox'][0]))
-                    text = ' '.join(t['word'] for t in tokens_sorted)
+                    # Reconstruct text grouped by line to maintain reading order
+                    tokens_sorted = sorted(tokens, key=lambda t: (t['par_num'], t['line_num'], t['bbox'][0]))
+                    text_lines = []
+                    current_key = None
+                    current_line = []
+                    for t in tokens_sorted:
+                        key = (t['par_num'], t['line_num'])
+                        if current_key is None:
+                            current_key = key
+                        if key != current_key:
+                            text_lines.append(' '.join(w['word'] for w in current_line))
+                            current_line = []
+                            current_key = key
+                        current_line.append(t)
+                    if current_line:
+                        text_lines.append(' '.join(w['word'] for w in current_line))
+                    text = '\n'.join([ln.strip() for ln in text_lines if ln.strip()])
                     mean_conf = sum(t['conf'] for t in tokens_sorted) / max(1, len(tokens_sorted))
-                    score = self._score_ocr_result(text, mean_conf)
+                    score = self._score_ocr_result(text.replace('\n', ' '), mean_conf)
                     if score > best['score']:
                         best = {"text": text, "tokens": tokens_sorted, "mean_conf": mean_conf, "score": score}
                 except Exception:
                     continue
+        
+        # Fallback: if we didn't get tokens with decent text, try image_to_string once
+        if (not best["text"]) or (len(best["tokens"]) == 0):
+            try:
+                fallback_text = self.pytesseract.image_to_string(self._preprocess_aggressive(image), lang=language, config='--psm 6 --oem 3').strip()
+                if fallback_text and len(fallback_text) > len(best["text"]):
+                    best = {"text": fallback_text, "tokens": [], "mean_conf": 0.0, "score": self._score_ocr_result(fallback_text, 50.0)}
+            except Exception:
+                pass
         
         return {k: best[k] for k in ("text", "tokens", "mean_conf")}
 
@@ -333,6 +387,55 @@ class TesseractOCRProcessor:
         alpha_ratio = sum(1 for w in words if any(ch.isalpha() for ch in w)) / len(words)
         length_bonus = min(len(text) / 100.0, 1.0)
         return 0.6 * (mean_conf / 100.0) + 0.3 * alpha_ratio + 0.1 * length_bonus
+
+    def _assemble_text_from_characters(self, characters: List[Dict[str, Any]]) -> str:
+        """Assemble text from detected character boxes by grouping into lines and sorting left-to-right.
+        Useful when image_to_data finds no tokens but characters are clearly segmented.
+        """
+        if not characters:
+            return ""
+        try:
+            # Group by approximate line using y-center; allow small tolerance
+            import math
+            chars = [c for c in characters if c.get('bbox')]
+            if not chars:
+                return ""
+            # Compute line groups
+            lines: List[List[Dict[str, Any]]] = []
+            y_centers = []
+            for c in sorted(chars, key=lambda ch: ch['bbox'][1]):
+                x, y, w, h = c['bbox']
+                cy = y + h / 2.0
+                placed = False
+                for idx, yc in enumerate(y_centers):
+                    if abs(cy - yc) <= max(h, 18):  # tolerance based on character height
+                        lines[idx].append(c)
+                        # Update running average for the line center
+                        y_centers[idx] = (y_centers[idx] * (len(lines[idx]) - 1) + cy) / len(lines[idx])
+                        placed = True
+                        break
+                if not placed:
+                    lines.append([c])
+                    y_centers.append(cy)
+            # Sort lines by y and chars in each line by x
+            assembled_lines: List[str] = []
+            for line in sorted(lines, key=lambda lst: lst[0]['bbox'][1]):
+                line_sorted = sorted(line, key=lambda ch: ch['bbox'][0])
+                letters: List[str] = []
+                for ch in line_sorted:
+                    matches = ch.get('template_matches') or []
+                    if matches:
+                        letters.append(matches[0].get('letter', '') or '')
+                    else:
+                        letters.append('')
+                # Merge letters to string; collapse multiple empties
+                word = ''.join(letters)
+                assembled_lines.append(word.strip())
+            # Join lines; filter empties
+            text = '\n'.join([ln for ln in assembled_lines if ln])
+            return text
+        except Exception:
+            return ""
 
     def _map_characters_to_words(self, characters: List[Dict[str, Any]], tokens: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Assign each detected character contour to the most likely word token.
@@ -509,50 +612,107 @@ class TesseractOCRProcessor:
                 except:
                     return {"characters": [], "error": "Could not load image"}
             
-            # Try different thresholding methods
-            binary = None
+            # Build robust binary mask for character segmentation
             try:
-                _, binary = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                # Otsu both normal and inverted
+                _, bin_inv = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                _, bin_norm = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
             except:
-                # Fallback threshold
-                threshold = np.mean(img)
-                binary = np.where(img < threshold, 255, 0).astype(np.uint8)
+                thr = np.mean(img)
+                bin_inv = np.where(img < thr, 255, 0).astype(np.uint8)
+                bin_norm = np.where(img > thr, 255, 0).astype(np.uint8)
             
-            # Find contours with error handling
+            def pick_mask(b1, b2):
+                # Choose mask with more plausible components after small opening
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+                o1 = cv2.morphologyEx(b1, cv2.MORPH_OPEN, kernel, iterations=1)
+                o2 = cv2.morphologyEx(b2, cv2.MORPH_OPEN, kernel, iterations=1)
+                c1, _ = cv2.findContours(o1, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                c2, _ = cv2.findContours(o2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                # Prefer the one with more components but not extremely noisy
+                if 5 <= len(c1) <= 200 and (len(c1) >= len(c2) or len(c2) > 200):
+                    return o1
+                if 5 <= len(c2) <= 200:
+                    return o2
+                return o1 if len(c1) >= len(c2) else o2
+            
+            binary = pick_mask(bin_inv, bin_norm)
+            
+            # Slight dilation to connect broken strokes, then opening to separate touching components
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+            proc = cv2.dilate(binary, kernel, iterations=1)
+            proc = cv2.morphologyEx(proc, cv2.MORPH_OPEN, kernel, iterations=1)
+            
+            # Find contours
             try:
-                contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                contours, _ = cv2.findContours(proc, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             except:
                 return {"characters": [], "error": "Could not find contours"}
             
             characters = []
-            for i, contour in enumerate(contours):
+            img_h, img_w = img.shape[:2]
+            min_area = max(20, int(0.00005 * img_w * img_h))
+            max_area = int(0.1 * img_w * img_h)
+            char_id = 0
+            
+            def split_wide_bbox(x, y, w, h, src_mask):
+                # Split very wide components into probable letters using vertical projection
+                if w <= h * 1.8:
+                    return [(x, y, w, h)]
+                roi = src_mask[y:y+h, x:x+w]
+                proj = roi.sum(axis=0)
+                # Find valleys to split
+                import numpy as np
+                thresh = np.percentile(proj, 30)
+                cuts = []
+                in_gap = False
+                start = 0
+                segments = []
+                for i, val in enumerate(proj):
+                    if val <= thresh and not in_gap:
+                        in_gap = True
+                        if i - start > 5:
+                            segments.append((start, i))
+                    elif val > thresh and in_gap:
+                        in_gap = False
+                        start = i
+                if len(segments) < 1:
+                    return [(x, y, w, h)]
+                boxes = []
+                prev = 0
+                for (s, e) in segments:
+                    ww = s - prev
+                    if ww > 5:
+                        boxes.append((x+prev, y, ww, h))
+                    prev = e
+                if w - prev > 5:
+                    boxes.append((x+prev, y, w-prev, h))
+                return boxes if boxes else [(x, y, w, h)]
+            
+            for contour in contours:
                 try:
                     area = cv2.contourArea(contour)
-                    if area < 30:  # Lower threshold for small text
+                    if area < min_area or area > max_area:
                         continue
-                    
                     x, y, w, h = cv2.boundingRect(contour)
-                    
-                    # Ensure valid bounding box
                     if w < 5 or h < 5:
                         continue
-                    
-                    char_img = binary[y:y+h, x:x+w]
-                    
-                    # Safe feature extraction
-                    features = self._extract_geometric_features_safe(contour, char_img)
-                    matches = self._enhanced_template_match_safe(char_img, features)
-                    errors = self._analyze_character_errors_safe(char_img, features)
-                    
-                    characters.append({
-                        "id": i,
-                        "bbox": [x, y, w, h],
-                        "features": features,
-                        "template_matches": matches,
-                        "errors": errors
-                    })
-                except Exception as char_error:
-                    # Skip problematic characters but continue
+                    # Optionally split very wide components
+                    parts = split_wide_bbox(x, y, w, h, proc)
+                    for (px, py, pw, ph) in parts:
+                        char_img = proc[py:py+ph, px:px+pw]
+                        features = self._extract_geometric_features_safe(contour, char_img)
+                        matches = self._enhanced_template_match_safe(char_img, features)
+                        errors = self._analyze_character_errors_safe(char_img, features)
+                        characters.append({
+                            "id": char_id,
+                            "bbox": [px, py, pw, ph],
+                            "features": features,
+                            "template_matches": matches,
+                            "errors": errors
+                        })
+                        char_id += 1
+                except Exception:
                     continue
             
             # Generate visual overlay (optional, don't fail if it doesn't work)
@@ -1068,21 +1228,24 @@ class TesseractOCRProcessor:
         return text_pixels / img_array.size
     
     def _post_process_text(self, text: str) -> str:
-        """Post-process OCR text"""
+        """Post-process OCR text keeping line structure and fixing common errors."""
         if not text:
             return text
-            
         import re
-        text = re.sub(r'\s+', ' ', text).strip()
+        # Normalize Windows/Mac line endings, collapse excessive spaces but preserve newlines
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        lines = [re.sub(r'\s+', ' ', ln).strip() for ln in text.split('\n')]
+        text = '\n'.join([ln for ln in lines if ln])
         
         corrections = {'rn': 'm', 'cl': 'd', 'vv': 'w', 'ii': 'n'}
         for wrong, correct in corrections.items():
             text = text.replace(wrong, correct)
         
+        # Isolated digit confusions
         text = re.sub(r'\b1\b', 'I', text)
         text = re.sub(r'\b0\b', 'O', text)
+        # Collapse extreme repeats
         text = re.sub(r'(.)\1{3,}', r'\1', text)
-        
         return text
     
     def _analyze_basic_errors(self, text: str) -> List[Dict[str, Any]]:

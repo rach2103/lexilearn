@@ -794,13 +794,21 @@ async def get_chat_history(limit: int = 20, current_user: User = Depends(get_cur
     # Sort dates in descending order (most recent first)
     sorted_dates = sorted(history_by_date.keys(), reverse=True)
     
-    # Format response
+    # Format response with messages sorted by timestamp ascending within each date
     formatted_history = []
     for date in sorted_dates:
+        day_messages = history_by_date[date]
+        try:
+            day_messages = sorted(
+                day_messages,
+                key=lambda m: m.get("timestamp", "")
+            )
+        except Exception as e:
+            print(f"[WARN] Failed to sort day messages for {date}: {e}")
         formatted_history.append({
             "date": date,
-            "message_count": len(history_by_date[date]),
-            "messages": history_by_date[date]
+            "message_count": len(day_messages),
+            "messages": day_messages
         })
     
     print(f"[DEBUG] Returning {len(formatted_history)} days of history")
@@ -808,7 +816,7 @@ async def get_chat_history(limit: int = 20, current_user: User = Depends(get_cur
     return {
         "history_by_date": formatted_history,
         "total_days": len(formatted_history),
-        "total_messages": sum(len(history_by_date[date]) for date in history_by_date),
+        "total_messages": sum(len(group["messages"]) for group in formatted_history),
         "current_session_id": ai_tutor.get_current_session_id(user_id)
     }
 
