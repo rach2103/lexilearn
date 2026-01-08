@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccessibility } from '../contexts/AccessibilityContext';
+import { usePrivacy } from '../contexts/PrivacyContext';
 import { 
   FiUser, 
   FiEye, 
   FiType, 
-  FiVolume2, 
   FiSave,
-  FiRotateCcw,
-  FiBell,
   FiShield
 } from 'react-icons/fi';
 import toast from 'react-hot-toast';
@@ -26,6 +24,26 @@ const Settings = () => {
     increaseLineSpacing,
     decreaseLineSpacing
   } = useAccessibility();
+  
+  // Local privacy state
+  const [privacyMode, setPrivacyMode] = useState(false);
+
+  const togglePrivacyMode = () => {
+    setPrivacyMode(prev => !prev);
+  };
+
+  const maskText = (text, showLength = 3) => {
+    if (!privacyMode || !text) return text;
+    if (text.length <= showLength) return '*'.repeat(text.length);
+    return text.substring(0, showLength) + '*'.repeat(text.length - showLength);
+  };
+
+  const maskEmail = (email) => {
+    if (!privacyMode || !email) return email;
+    const [username, domain] = email.split('@');
+    if (!domain) return maskText(email);
+    return maskText(username, 2) + '@' + maskText(domain, 2);
+  };
 
   const [isSaving, setIsSaving] = useState(false);
   const [userSettings, setUserSettings] = useState({
@@ -35,9 +53,7 @@ const Settings = () => {
     fontSize: settings.fontSize,
     lineSpacing: settings.lineSpacing,
     colorScheme: settings.colorScheme,
-    language: settings.language,
-    notifications: true,
-    privacyMode: false
+    language: settings.language
   });
 
   // Keep local form state in sync with context settings when they load or change.
@@ -50,9 +66,7 @@ const Settings = () => {
       fontSize: settings.fontSize,
       lineSpacing: settings.lineSpacing,
       colorScheme: settings.colorScheme,
-      language: settings.language,
-      notifications: prev.notifications ?? true,
-      privacyMode: prev.privacyMode ?? false
+      language: settings.language
     }));
   }, [settings, user]);
 
@@ -113,9 +127,7 @@ const Settings = () => {
       fontSize: 16,
       lineSpacing: 1.5,
       colorScheme: 'high_contrast',
-      language: 'en',
-      notifications: true,
-      privacyMode: false
+      language: 'en'
     });
     toast.success('Settings reset to defaults');
   };
@@ -147,7 +159,7 @@ const Settings = () => {
                   <label className="form-label">Full Name</label>
                   <input
                     type="text"
-                    value={userSettings.fullName}
+                    value={maskText(userSettings.fullName)}
                     onChange={(e) => setUserSettings(prev => ({ ...prev, fullName: e.target.value }))}
                     className="input-field"
                     placeholder="Enter your full name"
@@ -157,7 +169,7 @@ const Settings = () => {
                   <label className="form-label">Email Address</label>
                   <input
                     type="email"
-                    value={userSettings.email}
+                    value={maskEmail(userSettings.email)}
                     disabled
                     className="input-field bg-gray-50"
                     placeholder="Your email"
@@ -277,77 +289,10 @@ const Settings = () => {
 
               </div>
             </div>
-
-            {/* Notification Settings */}
-            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
-              <h2 className="text-dyslexic-xl font-bold text-gray-900 mb-6 flex items-center">
-                <FiBell className="mr-2" />
-                Notification Settings
-              </h2>
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-dyslexic-base font-medium text-gray-900">Email Notifications</p>
-                    <p className="text-dyslexic-sm text-gray-600">Receive updates and reminders</p>
-                  </div>
-                  <button
-                    onClick={() => setUserSettings(prev => ({ ...prev, notifications: !prev.notifications }))}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      userSettings.notifications ? 'bg-primary-600' : 'bg-gray-200'
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        userSettings.notifications ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
-            </div>
           </div>
 
-          {/* Quick Actions Sidebar */}
+          {/* Privacy Settings */}
           <div className="space-y-6">
-            {/* Quick Actions */}
-            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
-              <h3 className="text-dyslexic-lg font-semibold text-gray-900 mb-4">
-                Quick Actions
-              </h3>
-              <div className="space-y-3">
-                <button
-                  onClick={toggleHighContrast}
-                  className="w-full text-left p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center">
-                    <FiEye className="mr-3 text-primary-600" size={18} />
-                    <span className="text-dyslexic-base">Toggle High Contrast</span>
-                  </div>
-                </button>
-
-                <button
-                  onClick={toggleTextToSpeech}
-                  className="w-full text-left p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center">
-                    <FiVolume2 className="mr-3 text-primary-600" size={18} />
-                    <span className="text-dyslexic-base">Toggle Text-to-Speech</span>
-                  </div>
-                </button>
-
-                <button
-                  onClick={handleReset}
-                  className="w-full text-left p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center">
-                    <FiRotateCcw className="mr-3 text-warning-600" size={18} />
-                    <span className="text-dyslexic-base">Reset to Defaults</span>
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* Privacy Settings */}
             <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
               <h3 className="text-dyslexic-lg font-semibold text-gray-900 mb-4 flex items-center">
                 <FiShield className="mr-2" />
@@ -360,14 +305,17 @@ const Settings = () => {
                     <p className="text-dyslexic-sm text-gray-600">Hide sensitive information</p>
                   </div>
                   <button
-                    onClick={() => setUserSettings(prev => ({ ...prev, privacyMode: !prev.privacyMode }))}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      userSettings.privacyMode ? 'bg-primary-600' : 'bg-gray-200'
+                    type="button"
+                    onClick={() => {
+                      togglePrivacyMode();
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors touch-manipulation ${
+                      privacyMode ? 'bg-primary-600' : 'bg-gray-200'
                     }`}
                   >
                     <span
                       className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        userSettings.privacyMode ? 'translate-x-6' : 'translate-x-1'
+                        privacyMode ? 'translate-x-6' : 'translate-x-1'
                       }`}
                     />
                   </button>

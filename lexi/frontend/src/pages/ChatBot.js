@@ -8,7 +8,6 @@ import {
   FiImage, 
   FiVolume2, 
   FiVolumeX,
-  FiArrowUp,
   FiArrowDown,
   FiMessageCircle,
   FiEdit3,
@@ -40,13 +39,6 @@ const ChatBot = () => {
   const messagesContainerRef = useRef(null);
   const fileInputRef = useRef(null);
   const audioRef = useRef(null);
-
-  // Scroll functions
-  const scrollToTop = () => {
-    if (messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -81,13 +73,56 @@ const ChatBot = () => {
       }
       
       // Check if there's existing history
-      const response = await axios.get('/api/chat/history');
-      console.log('Initial history check:', response.data);
-      
-      const hasHistory = response.data && response.data.history_by_date && response.data.history_by_date.length > 0;
-      
-      if (!hasHistory) {
-        // Only show welcome message if no history exists
+      try {
+        const token = localStorage.getItem('token');
+        const response = await axios.get('/api/chat/history', {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        console.log('Initial history check:', response.data);
+        
+        const hasHistory = response.data && response.data.history_by_date && response.data.history_by_date.length > 0;
+        
+        if (!hasHistory) {
+          // Only show welcome message if no history exists
+          setMessages([
+            {
+              id: 1,
+              type: 'ai',
+              content: `Hello ${user?.full_name || 'there'}! I'm your LexiLearn AI tutor. I can help you with reading, writing, and speaking exercises. You can type, speak, or upload images of your handwriting. Let's start learning!`,
+              timestamp: new Date(),
+              analysis: null
+            }
+          ]);
+        } else {
+          // Restore messages from history
+          const restoredMessages = [];
+          let messageId = 1;
+          
+          response.data.history_by_date.forEach((dateGroup) => {
+            dateGroup.messages.forEach((item) => {
+              // Add user message
+              restoredMessages.push({
+                id: messageId++,
+                type: 'user',
+                content: item.user_message,
+                timestamp: new Date(item.timestamp)
+              });
+              // Add AI response
+              restoredMessages.push({
+                id: messageId++,
+                type: 'ai',
+                content: item.bot_response,
+                timestamp: new Date(item.timestamp)
+              });
+            });
+          });
+          
+          console.log('Restored messages:', restoredMessages.length);
+          setMessages(restoredMessages);
+        }
+      } catch (error) {
+        console.error('Failed to load chat history:', error);
+        // Show welcome message on error
         setMessages([
           {
             id: 1,
@@ -97,32 +132,6 @@ const ChatBot = () => {
             analysis: null
           }
         ]);
-      } else {
-        // Restore messages from history
-        const restoredMessages = [];
-        let messageId = 1;
-        
-        response.data.history_by_date.forEach((dateGroup) => {
-          dateGroup.messages.forEach((item) => {
-            // Add user message
-            restoredMessages.push({
-              id: messageId++,
-              type: 'user',
-              content: item.user_message,
-              timestamp: new Date(item.timestamp)
-            });
-            // Add AI response
-            restoredMessages.push({
-              id: messageId++,
-              type: 'ai',
-              content: item.bot_response,
-              timestamp: new Date(item.timestamp)
-            });
-          });
-        });
-        
-        console.log('Restored messages:', restoredMessages.length);
-        setMessages(restoredMessages);
       }
     };
     
@@ -132,7 +141,10 @@ const ChatBot = () => {
   // Load chat history for sidebar
   const loadChatHistory = async () => {
     try {
-      const response = await axios.get('/api/chat/history');
+      const token = localStorage.getItem('token');
+      const response = await axios.get('/api/chat/history', {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
       console.log('Chat history response:', response.data);
       
       if (response.data && response.data.history_by_date) {
@@ -292,6 +304,17 @@ const ChatBot = () => {
   const sendMessage = async () => {
     if (!inputText.trim() && !selectedFile) return;
 
+    // Track daily messages
+    const today = new Date().toDateString();
+    const lastMessageDate = localStorage.getItem('lastMessageDate');
+    if (lastMessageDate !== today) {
+      localStorage.setItem('dailyMessages', '1');
+      localStorage.setItem('lastMessageDate', today);
+    } else {
+      const currentCount = parseInt(localStorage.getItem('dailyMessages') || '0', 10);
+      localStorage.setItem('dailyMessages', (currentCount + 1).toString());
+    }
+
     // Clear the screen cleared flag when user sends a new message
     localStorage.removeItem('chatScreenCleared');
 
@@ -353,8 +376,11 @@ const ChatBot = () => {
       } else if (inputText.trim()) {
         // Send to backend AI tutor for intelligent response
         try {
+          const token = localStorage.getItem('token');
           const response = await axios.post('/api/chat/message', {
             message: inputText
+          }, {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
           });
           
           if (response.data) {
@@ -430,6 +456,9 @@ const ChatBot = () => {
       };
 
       setMessages(prev => [...prev, aiMessage]);
+      
+      // Reload chat history to include new messages
+      await loadChatHistory();
     } catch (error) {
       console.error('Send message error:', error);
       toast.error('Failed to send message');
@@ -463,6 +492,10 @@ const ChatBot = () => {
       
       if (response.data) {
         const exercise = response.data;
+        
+        // Update exercises completed count
+        const currentCount = parseInt(localStorage.getItem('exercisesCompleted') || '0', 10);
+        localStorage.setItem('exercisesCompleted', (currentCount + 1).toString());
         
         // Create exercise message
         const exerciseMessage = {
@@ -562,6 +595,33 @@ const ChatBot = () => {
     }
 
     const textLower = text ? text.toLowerCase() : '';
+    
+    // Handle practice word requests
+    if (textLower.includes('give') && textLower.includes('words') && textLower.includes('practice')) {
+      // Generate practice words based on recent exercises or common patterns
+      const practiceWords = [
+        'tube', 'time', 'game', 'cake', 'bike',
+        'hope', 'note', 'cute', 'huge', 'fine',
+        'make', 'take', 'like', 'home', 'bone'
+      ];
+      
+      // Select 5 random words
+      const selectedWords = practiceWords.sort(() => 0.5 - Math.random()).slice(0, 5);
+      
+      let response = `📝 **Practice Words for You:**\n\n`;
+      selectedWords.forEach((word, index) => {
+        response += `${index + 1}. **${word}**\n`;
+      });
+      
+      response += `\n💡 **Practice Tips:**\n`;
+      response += `• Try writing each word 3 times\n`;
+      response += `• Say each word out loud as you write it\n`;
+      response += `• Focus on the vowel sounds\n`;
+      response += `• These words follow the CVCe pattern (consonant-vowel-consonant-e)\n\n`;
+      response += `Ready to practice? Write these words and I'll help you improve!`;
+      
+      return response;
+    }
     
     // Handle specific questions and topics
     if (textLower.includes('what') && (textLower.includes('dyslexia') || textLower.includes('dyslexic'))) {
@@ -1008,17 +1068,9 @@ const ChatBot = () => {
 
           <div ref={messagesEndRef} />
 
-          {/* Scroll buttons */}
+          {/* Scroll to bottom button */}
           {messages.length > 3 && (
-            <div className="fixed bottom-32 right-8 flex flex-col space-y-2 z-10">
-              <button
-                onClick={scrollToTop}
-                className="p-3 bg-primary-600 text-white rounded-full shadow-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 transition-all"
-                aria-label="Scroll to top"
-                title="Scroll to top"
-              >
-                <FiArrowUp size={20} />
-              </button>
+            <div className="fixed bottom-32 right-8 z-10">
               <button
                 onClick={scrollToBottom}
                 className="p-3 bg-primary-600 text-white rounded-full shadow-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 transition-all"

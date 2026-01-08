@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import useTimeTracking from '../useTimeTracking';
 import { 
   FiTrendingUp, 
   FiCalendar, 
@@ -14,6 +15,7 @@ import {
 
 const Progress = () => {
   const { user } = useAuth();
+  const { getTotalTime } = useTimeTracking();
   const [progressData, setProgressData] = useState({
     weeklyProgress: [],
     skillProgress: [],
@@ -79,14 +81,21 @@ const Progress = () => {
         icon: FiAward
       }));
 
+      // Get lesson clicks from localStorage
+      const lessonClicks = parseInt(localStorage.getItem('lessonClicks') || '0', 10);
+      
+      // Get time from time tracking hook (in seconds, convert to minutes)
+      const totalTimeSeconds = getTotalTime();
+      const totalTimeMinutes = Math.floor(totalTimeSeconds / 60);
+
       setProgressData({
         weeklyProgress: weekly.length ? weekly : progressData.weeklyProgress,
         skillProgress: skills.length ? skills : progressData.skillProgress,
         achievements: achievements.length ? achievements : progressData.achievements,
         summary: {
-          totalLessons: statsData.exercises_completed || (data.lessons_completed || []).length || 0,
+          totalLessons: lessonClicks,
           averageAccuracy: Math.round(statsData.accuracy || data.overall_accuracy || 0),
-          studyTimeMins: Math.round(statsData.study_time_minutes || data.total_study_time || 0),
+          studyTimeMins: totalTimeMinutes,
           currentStreak: data.current_streak || 0
         }
       });

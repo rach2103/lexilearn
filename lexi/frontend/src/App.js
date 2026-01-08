@@ -3,6 +3,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AccessibilityProvider } from './contexts/AccessibilityContext';
+import { PrivacyProvider } from './contexts/PrivacyContext';
+import useTimeTracking from './useTimeTracking';
 
 // Components
 import Navbar from './components/layout/Navbar';
@@ -36,6 +38,7 @@ const ProtectedRoute = ({ children }) => {
 // Main App Component
 const AppContent = () => {
   const { user } = useAuth();
+  useTimeTracking(); // Global time tracking
   const [isLoading, setIsLoading] = useState(true);
   const [sessionStartTime] = useState(Date.now());
   const [alertShown, setAlertShown] = useState(false);

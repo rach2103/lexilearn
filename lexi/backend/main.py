@@ -470,11 +470,16 @@ async def analyze_speech(
 @app.post("/api/recognize-handwriting")
 async def recognize_handwriting(
     image_file: UploadFile = File(...),
-    language: str = "en"
+    language: str = "en",
+    current_user: User = Depends(get_current_user)
 ):
     """Recognize handwritten text with educational feedback"""
-    # Save uploaded file temporarily
-    file_path = f"{settings.UPLOAD_DIR}/{uuid.uuid4()}_{image_file.filename}"
+    # Create user-specific upload directory
+    user_upload_dir = f"{settings.UPLOAD_DIR}/user_{current_user['id']}"
+    os.makedirs(user_upload_dir, exist_ok=True)
+    
+    # Save uploaded file with user-specific path
+    file_path = f"{user_upload_dir}/{uuid.uuid4()}_{image_file.filename}"
     with open(file_path, "wb") as buffer:
         content = await image_file.read()
         buffer.write(content)
@@ -543,11 +548,16 @@ async def recognize_handwriting(
 @app.post("/api/correct-handwriting")
 async def correct_handwriting(
     image_file: UploadFile = File(...),
-    language: str = "en"
+    language: str = "en",
+    current_user: User = Depends(get_current_user)
 ):
     """Recognize and correct handwritten text with comprehensive feedback"""
-    # Save uploaded file temporarily
-    file_path = f"{settings.UPLOAD_DIR}/{uuid.uuid4()}_{image_file.filename}"
+    # Create user-specific upload directory
+    user_upload_dir = f"{settings.UPLOAD_DIR}/user_{current_user['id']}"
+    os.makedirs(user_upload_dir, exist_ok=True)
+    
+    # Save uploaded file with user-specific path
+    file_path = f"{user_upload_dir}/{uuid.uuid4()}_{image_file.filename}"
     with open(file_path, "wb") as buffer:
         content = await image_file.read()
         buffer.write(content)
@@ -809,36 +819,66 @@ async def get_user_stats(current_user: User = Depends(get_current_user), db_mana
     user_email = current_user["email"]
     
     # Get progress from database
-    progress_entries = db_manager.get_user_progress(user_id)
+    progress_entries = db_manager.get_user_progress(user_id) if hasattr(db_manager, 'get_user_progress') else []
     
     # Calculate exercises completed and accuracy from database
     total_exercises = len(progress_entries)
-    total_accuracy = sum(p["accuracy"] for p in progress_entries) if progress_entries else 0
+    total_accuracy = sum(p.get("accuracy", 0) for p in progress_entries) if progress_entries else 0
     accuracy = (total_accuracy / total_exercises) if total_exercises > 0 else 0
     
-    # Calculate study time from database (session_duration is in seconds)
-    total_study_time = sum(p["session_duration"] for p in progress_entries) // 60 if progress_entries else 0
+    # Calculate study time from database (session_duration is in seconds, convert to minutes)
+    total_study_time = sum(p.get("session_duration", 0) for p in progress_entries) // 60 if progress_entries else 0
     
     # Get chat history from database
-    chat_history = db_manager.load_chat_history(user_id)
+    chat_history = db_manager.load_chat_history(user_id) if hasattr(db_manager, 'load_chat_history') else {}
     total_messages = sum(len(messages) for messages in chat_history.values())
     
-    # Also check AI tutor in-memory data for current session
+    # Calculate daily chat messages (today)
+    from datetime import date
+    today = date.today().isoformat()
+    daily_messages = 0
+    for session_messages in chat_history.values():
+        for msg in session_messages:
+            msg_date = msg.get("timestamp", "")[:10]  # Extract YYYY-MM-DD
+            if msg_date == today:
+                daily_messages += 1
+    
+    # Get AI tutor in-memory data for current session
     ai_progress = ai_tutor.user_progress.get(user_email, {})
     ai_sessions = ai_progress.get("sessions", [])
     
     # Add in-memory session data to totals
     if ai_sessions:
-        total_exercises += len(ai_sessions)
+        # Count AI tutor exercises
+        ai_exercises = len([s for s in ai_sessions if s.get("data", {}).get("exercise_id")])
+        total_exercises += ai_exercises
+        
+        # Calculate AI tutor accuracy
         correct_count = sum(1 for s in ai_sessions if s.get("data", {}).get("correct", False))
-        if ai_sessions:
-            ai_accuracy = (correct_count / len(ai_sessions) * 100)
-            accuracy = ((accuracy * len(progress_entries)) + ai_accuracy) / (len(progress_entries) + 1) if progress_entries else ai_accuracy
+        if ai_exercises > 0:
+            ai_accuracy = (correct_count / ai_exercises) * 100
+            if total_exercises > ai_exercises:
+                accuracy = ((accuracy * (total_exercises - ai_exercises)) + ai_accuracy) / total_exercises
+            else:
+                accuracy = ai_accuracy
+        
+        # Add estimated study time (5 minutes per AI session)
         total_study_time += len(ai_sessions) * 5
     
     # Get chat messages from AI tutor memory
-    ai_chat_history = ai_tutor.get_history(user_email, 1000)
-    total_messages += len(ai_chat_history)
+    try:
+        ai_chat_history = ai_tutor.conversation_history.get(user_email, {})
+        ai_message_count = sum(len(session_msgs) for session_msgs in ai_chat_history.values())
+        total_messages += ai_message_count
+        
+        # Count today's AI messages
+        for session_msgs in ai_chat_history.values():
+            for msg in session_msgs:
+                msg_date = msg.get("timestamp", "")[:10]
+                if msg_date == today:
+                    daily_messages += 1
+    except:
+        pass
     
     # Calculate skill-specific progress
     skill_progress = {
@@ -865,7 +905,7 @@ async def get_user_stats(current_user: User = Depends(get_current_user), db_mana
         "reading_comprehension": "comprehension"
     }
     
-    # Process AI tutor sessions
+    # Process AI tutor sessions for skill progress
     for session in ai_sessions:
         data = session.get("data", {})
         skill_area = data.get("skill_area", "")
@@ -881,11 +921,15 @@ async def get_user_stats(current_user: User = Depends(get_current_user), db_mana
     for skill, counts in skill_counts.items():
         if counts["total"] > 0:
             skill_progress[skill] = round((counts["correct"] / counts["total"]) * 100, 1)
+        else:
+            # Default progress based on overall accuracy if no specific skill data
+            skill_progress[skill] = round(accuracy * 0.8, 1) if accuracy > 0 else 0
     
     return {
         "exercises_completed": total_exercises,
         "accuracy": round(accuracy, 1),
         "total_messages": total_messages,
+        "daily_messages": daily_messages,
         "study_time_minutes": total_study_time,
         "skill_progress": skill_progress,
         "recent_activity": ai_sessions[-5:] if ai_sessions else []
@@ -1219,6 +1263,24 @@ async def get_learning_videos(level: str = "beginner"):
         "message": f"Found {len(videos)} learning videos for {level} level"
     }
 
+@app.post("/api/lessons/{lesson_id}/start")
+async def start_lesson(lesson_id: int, current_user: User = Depends(get_current_user), db_manager = Depends(get_db)):
+    """Track when user starts a lesson"""
+    from database.database import db_manager
+    
+    # Create progress entry for lesson start
+    progress_id = db_manager.create_progress_entry({
+        "user_id": current_user["id"],
+        "lesson_id": lesson_id,
+        "accuracy": 0,
+        "speed": 0,
+        "errors": [],
+        "session_duration": 0,
+        "completed": False
+    }) if hasattr(db_manager, 'create_progress_entry') else lesson_id
+    
+    return {"message": "Lesson started", "progress_id": progress_id}
+
 @app.post("/api/lessons/{lesson_id}/complete")
 async def complete_lesson(lesson_id: int, completion_data: dict, current_user: User = Depends(get_current_user)):
     """Mark lesson as completed and save progress"""
@@ -1314,14 +1376,16 @@ async def submit_exercise_response(
     
     # Save to database
     try:
-        db_manager.create_progress_entry({
-            "user_id": current_user["id"],
-            "lesson_id": 0,  # Exercise, not a lesson
-            "accuracy": evaluation["score"],
-            "speed": 0,
-            "errors": evaluation.get("hints", []),
-            "session_duration": 300  # 5 minutes estimate
-        })
+        if hasattr(db_manager, 'create_progress_entry'):
+            db_manager.create_progress_entry({
+                "user_id": current_user["id"],
+                "lesson_id": 0,  # Exercise, not a lesson
+                "accuracy": evaluation["score"],
+                "speed": 0,
+                "errors": evaluation.get("hints", []),
+                "session_duration": 300,  # 5 minutes estimate
+                "completed": True
+            })
     except Exception as e:
         print(f"[ERROR] Failed to save exercise progress: {e}")
     
